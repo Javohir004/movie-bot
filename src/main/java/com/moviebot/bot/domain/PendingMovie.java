@@ -16,5 +16,8 @@ public class PendingMovie {
     private String code;
     private MovieType type;
     private String description;
+    private String editingCode;
+
+    public boolean isEditing() { return editingCode != null; }
 
 }

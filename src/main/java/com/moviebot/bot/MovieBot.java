@@ -2,6 +2,9 @@ package com.moviebot.bot;
 
 import com.moviebot.bot.domain.Keyboards;
 import com.moviebot.bot.domain.Movie;
+import com.moviebot.bot.domain.PendingMovie;
+import com.moviebot.bot.enums.AdminState;
+import com.moviebot.bot.enums.MovieType;
 import com.moviebot.bot.service.MovieService;
 import com.moviebot.bot.service.UserService;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,15 +28,17 @@ public class MovieBot extends TelegramLongPollingBot {
     private final String username;
     private final MovieService movieService;
     private final UserService userService;
+    private final AdminSessionManager sessionManager;
 
 
     public MovieBot(@Value("${bot.token}") String token,
                     @Value("${bot.username}") String username,
-                    MovieService movieService, UserService userService) {
+                    MovieService movieService, UserService userService, AdminSessionManager sessionManager) {
         super(token);
         this.username = username;
         this.movieService = movieService;
         this.userService = userService;
+        this.sessionManager = sessionManager;
     }
 
     @Override
@@ -55,11 +60,21 @@ public class MovieBot extends TelegramLongPollingBot {
                 return;
             }
 
-            if (data.startsWith("ADMIN:") && userService.isAdmin(userId)) {
+            if (userService.isAdmin(userId)) {
                 handleAdminCallback(chatId, userId, data);
-                return;
             }
 
+            return;
+        }
+
+        if (update.hasMessage() && update.getMessage().hasVideo()) {
+            long userId = update.getMessage().getFrom().getId();
+            long chatId = update.getMessage().getChatId();
+
+            if (userService.isAdmin(userId) && sessionManager.getState(userId) == AdminState.AWAITING_VIDEO) {
+                String fileId = update.getMessage().getVideo().getFileId();
+                finishAddMovie(chatId, userId, fileId);
+            }
             return;
         }
 
@@ -73,11 +88,16 @@ public class MovieBot extends TelegramLongPollingBot {
             if (text.equals("/start")) {
                 if (userService.isAdmin(userId)) {
                     String firstName = update.getMessage().getFrom().getFirstName();
-                    sendText(chatId, "Salom 👋 , " + firstName + " ! Xush kelibsiz 😆😁.");
+                    sendText(chatId, "Salom, " + firstName + "! Xush kelibsiz.");
                     sendAdminMenu(chatId);
                 } else {
                     sendText(chatId, "Salom! Men kino va anime botiman.\n\nKino nomini yoki kodini yozing, men qidirib topaman.");
                 }
+                return;
+            }
+
+            if (userService.isAdmin(userId) && sessionManager.getState(userId) != AdminState.NONE) {
+                handleAdminFlowInput(chatId, userId, text);
                 return;
             }
 
@@ -107,11 +127,253 @@ public class MovieBot extends TelegramLongPollingBot {
     }
 
     private void handleAdminCallback(long chatId, long userId, String data) {
-        switch (data) {
-            case "ADMIN:ADD_MOVIE" -> sendText(chatId, "Kino qo'shish hali tayyor emas (keyingi qadamda qo'shamiz).");
-            case "ADMIN:ADD_ADMIN" -> sendText(chatId, "Yozing: /addadmin <telegram_id>");
-            default -> sendText(chatId, "Noma'lum amal.");
+
+        if (data.equals("BACK")) {
+            goBack(chatId, userId);
+            return;
         }
+
+        if (data.startsWith("TYPE:") && sessionManager.getState(userId) == AdminState.AWAITING_TYPE) {
+            MovieType type = MovieType.valueOf(data.substring("TYPE:".length()));
+            sessionManager.getPendingMovie(userId).setType(type);
+            askDescription(chatId, userId);
+            return;
+        }
+
+        if (data.equals("ADMIN:ADD_MOVIE")) {
+            startAddMovieFlow(chatId, userId);
+            return;
+        }
+
+        if (data.equals("ADMIN:ADD_ADMIN")) {
+            SendMessage message = new SendMessage(String.valueOf(chatId), "Yozing: /addadmin <telegram_id>");
+            message.setReplyMarkup(Keyboards.backOnly());
+
+            try {
+                execute(message);
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        if (data.equals("ADMIN:LIST_MOVIES")) {
+            sendMovieList(chatId);
+            return;
+        }
+
+        if (data.equals("ADMIN:MENU")) {
+            sessionManager.clear(userId);
+            sendAdminMenu(chatId);
+            return;
+        }
+
+        if (data.startsWith("LISTITEM:")) {
+            showMovieDetail(chatId, data.substring("LISTITEM:".length()));
+            return;
+        }
+
+        if (data.startsWith("EDIT:")) {
+            startEditMovieFlow(chatId, userId, data.substring("EDIT:".length()));
+            return;
+        }
+
+        if (data.startsWith("DELETE:")) {
+            confirmDelete(chatId, data.substring("DELETE:".length()));
+            return;
+        }
+
+        if (data.startsWith("DELCONF:")) {
+            String code = data.substring("DELCONF:".length());
+            movieService.deleteByCode(code);
+            sendText(chatId, "🗑 O'chirildi.");
+            sendMovieList(chatId);
+            return;
+        }
+
+        sendText(chatId, "Noma'lum amal.");
+    }
+
+    private void handleAdminFlowInput(long chatId, long userId, String text) {
+        AdminState state = sessionManager.getState(userId);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+
+        switch (state) {
+            case AWAITING_TITLE -> {
+                pending.setTitle(text.trim());
+                askCode(chatId, userId);
+            }
+            case AWAITING_CODE -> {
+                pending.setCode(text.trim());
+                askType(chatId, userId);
+            }
+            case AWAITING_DESCRIPTION -> {
+                pending.setDescription(text.trim());
+                askVideo(chatId, userId);
+            }
+            case AWAITING_VIDEO -> {
+                if (pending.isEditing() && text.trim().equalsIgnoreCase("/skip")) {
+                    finishAddMovie(chatId, userId, null);
+                } else {
+                    sendText(chatId, "Iltimos, video yuboring" + (pending.isEditing() ? " yoki /skip yozing." : "."));
+                }
+            }
+            default -> sendText(chatId, "Nimadir xato ketdi. Qaytadan /start bosing.");
+        }
+    }
+
+    private void startAddMovieFlow(long chatId, long userId) {
+        sessionManager.clear(userId);
+        askTitle(chatId, userId);
+    }
+
+    private void startEditMovieFlow(long chatId, long userId, String code) {
+        Optional<Movie> movieOpt = movieService.findByCode(code);
+
+        if (movieOpt.isEmpty()) {
+            sendText(chatId, "Kino topilmadi.");
+            return;
+        }
+
+        Movie movie = movieOpt.get();
+        sessionManager.clear(userId);
+
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        pending.setEditingCode(movie.getCode());
+        pending.setTitle(movie.getTitle());
+        pending.setCode(movie.getCode());
+        pending.setType(movie.getType());
+        pending.setDescription(movie.getDescription());
+
+        askTitle(chatId, userId);
+    }
+
+    private void goBack(long chatId, long userId) {
+        AdminState state = sessionManager.getState(userId);
+
+        switch (state) {
+            case AWAITING_CODE -> askTitle(chatId, userId);
+            case AWAITING_TYPE -> askCode(chatId, userId);
+            case AWAITING_DESCRIPTION -> askType(chatId, userId);
+            case AWAITING_VIDEO -> askDescription(chatId, userId);
+            default -> {
+                sessionManager.clear(userId);
+                sendText(chatId, "Bekor qilindi.");
+                sendAdminMenu(chatId);
+            }
+        }
+    }
+
+    private void askTitle(long chatId, long userId) {
+        sessionManager.setState(userId, AdminState.AWAITING_TITLE);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        String current = pending.isEditing() ? "\n\nJoriy nom: " + pending.getTitle() : "";
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Kino/serial nomini yozing:" + current);
+        message.setReplyMarkup(Keyboards.backOnly());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void askCode(long chatId, long userId) {
+        sessionManager.setState(userId, AdminState.AWAITING_CODE);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        String current = pending.isEditing() ? "\n\nJoriy kod: " + pending.getCode() : "";
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Kod kiriting (masalan A103):" + current);
+        message.setReplyMarkup(Keyboards.backOnly());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void askType(long chatId, long userId) {
+        sessionManager.setState(userId, AdminState.AWAITING_TYPE);
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Turi qanday?");
+        message.setReplyMarkup(Keyboards.movieTypeMenu());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void askDescription(long chatId, long userId) {
+        sessionManager.setState(userId, AdminState.AWAITING_DESCRIPTION);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        String current = pending.isEditing() ? "\n\nJoriy tavsif: " + pending.getDescription() : "";
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Tavsifini yozing:" + current);
+        message.setReplyMarkup(Keyboards.backOnly());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void askVideo(long chatId, long userId) {
+        sessionManager.setState(userId, AdminState.AWAITING_VIDEO);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        String note = pending.isEditing() ? "\n\nVideoni yangilamoqchi bo'lmasangiz /skip yozing." : "";
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Endi videoni yuboring:" + note);
+        message.setReplyMarkup(Keyboards.backOnly());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendMovieTypeMenu(long chatId) {
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Turi qanday?");
+        message.setReplyMarkup(Keyboards.movieTypeMenu());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void finishAddMovie(long chatId, long userId, String fileId) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+
+        if (pending.isEditing()) {
+            movieService.update(
+                    pending.getEditingCode(),
+                    pending.getTitle(),
+                    pending.getCode(),
+                    pending.getType(),
+                    pending.getDescription(),
+                    fileId
+            );
+            sendText(chatId, "✅ \"" + pending.getTitle() + "\" yangilandi!");
+        } else {
+            movieService.save(
+                    pending.getTitle(),
+                    pending.getCode(),
+                    pending.getType(),
+                    pending.getDescription(),
+                    fileId
+            );
+            sendText(chatId, "✅ \"" + pending.getTitle() + "\" muvaffaqiyatli qo'shildi!");
+        }
+
+        sessionManager.clear(userId);
+        sendAdminMenu(chatId);
     }
 
     private void handleAdminCommand(long chatId, long userId, String text) {
@@ -220,4 +482,59 @@ public class MovieBot extends TelegramLongPollingBot {
             e.printStackTrace();
         }
     }
+
+    private void sendMovieList(long chatId) {
+        List<Movie> movies = movieService.findAll();
+
+        if (movies.isEmpty()) {
+            sendText(chatId, "Hozircha hech qanday kino qo'shilmagan.");
+            return;
+        }
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Barcha kino/seriallar:");
+        message.setReplyMarkup(Keyboards.movieListMenu(movies));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void showMovieDetail(long chatId, String code) {
+        Optional<Movie> movieOpt = movieService.findByCode(code);
+
+        if (movieOpt.isEmpty()) {
+            sendText(chatId, "Kino topilmadi.");
+            return;
+        }
+
+        Movie movie = movieOpt.get();
+        String info = movie.getTitle() + "\n"
+                + "Kod: " + movie.getCode() + "\n"
+                + "Turi: " + movie.getType() + "\n\n"
+                + movie.getDescription();
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), info);
+        message.setReplyMarkup(Keyboards.movieDetailMenu(movie.getCode()));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void confirmDelete(long chatId, String code) {
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Rostdan ham o'chirmoqchimisiz?");
+        message.setReplyMarkup(Keyboards.deleteConfirmMenu(code));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+
 }
