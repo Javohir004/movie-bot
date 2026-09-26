@@ -1,17 +1,18 @@
 package com.moviebot.bot.domain;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "seasons")
 @Getter
 @Setter
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class Season {
 
     @Id
@@ -24,5 +25,9 @@ public class Season {
 
     @Column(name = "season_number", nullable = false)
     private Integer seasonNumber;
+
+    @Builder.Default
+    @OneToMany(mappedBy = "season", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Episode> episodes = new ArrayList<>();
 
 }

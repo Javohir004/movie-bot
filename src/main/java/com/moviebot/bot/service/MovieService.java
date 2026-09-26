@@ -18,29 +18,49 @@ public class MovieService {
     }
 
     public Optional<Movie> findByCode(String code) {
-        return movieRepository.findByCode(code.trim());
+        return movieRepository.findByCodeAndActiveTrue(code.trim());
     }
 
     public List<Movie> findByTitle(String title) {
-        return movieRepository.findByTitleContainingIgnoreCase(title.trim());
+        return movieRepository.findByTitleContainingIgnoreCaseAndActiveTrue(title.trim());
     }
 
     public List<Movie> findAll() {
-        return movieRepository.findAll();
+        return movieRepository.findAllByActiveTrue();
+    }
+
+    public Movie getById(Long id) {
+        return movieRepository.findById(id)
+                .orElseThrow(() -> new IllegalStateException("Movie topilmadi: id=" + id));
     }
 
     public void save(String title, String code, MovieType type, String description, String fileId) {
-        Movie movie = new Movie();
-        movie.setTitle(title);
-        movie.setCode(code);
-        movie.setType(type);
-        movie.setDescription(description);
-        movie.setFileId(fileId);
+        Movie movie = Movie.builder()
+                .title(title)
+                .code(code)
+                .type(type)
+                .description(description)
+                .fileId(fileId)
+                .active(true)
+                .build();
+
         movieRepository.save(movie);
     }
 
+    public Movie saveWithoutVideo(String title, String code, MovieType type, String description) {
+        Movie movie = Movie.builder()
+                .title(title)
+                .code(code)
+                .type(type)
+                .description(description)
+                .active(true)
+                .build();
+
+        return movieRepository.save(movie);
+    }
+
     public void update(String originalCode, String title, String code, MovieType type, String description, String fileId) {
-        Movie movie = movieRepository.findByCode(originalCode)
+        Movie movie = movieRepository.findByCodeAndActiveTrue(originalCode)
                 .orElseThrow(() -> new IllegalStateException("Movie topilmadi: " + originalCode));
 
         movie.setTitle(title);
@@ -56,6 +76,9 @@ public class MovieService {
     }
 
     public void deleteByCode(String code) {
-        movieRepository.findByCode(code).ifPresent(movieRepository::delete);
+        movieRepository.findByCodeAndActiveTrue(code).ifPresent(movie -> {
+            movie.setActive(false);
+            movieRepository.save(movie);
+        });
     }
 }

@@ -50,7 +50,13 @@ public class BotConfig {
                         userRepository.save(user);
                     }
                 },
-                () -> userRepository.save(new User(rootAdminId, Role.ADMIN))
+                () -> {
+                    User rootAdmin = User.builder()
+                            .userId(rootAdminId)
+                            .role(Role.ADMIN)
+                            .build();
+                    userRepository.save(rootAdmin);
+                }
         );
     }
 }

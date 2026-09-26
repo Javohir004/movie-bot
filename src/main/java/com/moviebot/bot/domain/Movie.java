@@ -2,14 +2,19 @@ package com.moviebot.bot.domain;
 
 import com.moviebot.bot.enums.MovieType;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
+
+import java.util.ArrayList;
+import java.util.List;
 
 
 @Entity
 @Table(name = "movies")
 @Getter
 @Setter
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
 public class Movie {
 
     @Id
@@ -30,8 +35,11 @@ public class Movie {
     @Column(name = "file_id")
     private String fileId;
 
-    public Movie() {
-    }
+    @Builder.Default
+    @Column(name = "is_active", nullable = false)
+    private boolean active = true;
 
-
+    @Builder.Default
+    @OneToMany(mappedBy = "movie", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Season> seasons = new ArrayList<>();
 }

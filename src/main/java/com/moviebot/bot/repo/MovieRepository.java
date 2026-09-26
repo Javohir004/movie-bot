@@ -10,7 +10,9 @@ import java.util.Optional;
 @Repository
 public interface MovieRepository extends JpaRepository<Movie, Long> {
 
-    Optional<Movie> findByCode(String code);
+    Optional<Movie> findByCodeAndActiveTrue(String code);
 
-    List<Movie> findByTitleContainingIgnoreCase(String title);
+    List<Movie> findByTitleContainingIgnoreCaseAndActiveTrue(String title);
+
+    List<Movie> findAllByActiveTrue();
 }
