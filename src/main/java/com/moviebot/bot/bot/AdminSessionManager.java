@@ -1,4 +1,4 @@
-package com.moviebot.bot;
+package com.moviebot.bot.bot;
 
 import com.moviebot.bot.domain.PendingMovie;
 import com.moviebot.bot.enums.AdminState;

@@ -1,4 +1,4 @@
-package com.moviebot.bot;
+package com.moviebot.bot.bot;
 
 import com.moviebot.bot.domain.Keyboards;
 import com.moviebot.bot.domain.Movie;

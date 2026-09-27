@@ -1,6 +1,6 @@
 package com.moviebot.bot.config;
 
-import com.moviebot.bot.MovieBot;
+import com.moviebot.bot.bot.MovieBot;
 import com.moviebot.bot.domain.User;
 import com.moviebot.bot.enums.Role;
 import com.moviebot.bot.repo.UserRepository;
