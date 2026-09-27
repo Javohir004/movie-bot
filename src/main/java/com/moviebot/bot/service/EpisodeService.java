@@ -5,6 +5,8 @@ import com.moviebot.bot.domain.Season;
 import com.moviebot.bot.repo.EpisodeRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class EpisodeService {
 
@@ -22,5 +24,14 @@ public class EpisodeService {
                 .build();
 
         return episodeRepository.save(episode);
+    }
+
+    public List<Episode> getEpisodesForSeason(Long seasonId) {
+        return episodeRepository.findBySeasonIdOrderByEpisodeNumber(seasonId);
+    }
+
+    public Episode getById(Long id) {
+        return episodeRepository.findById(id)
+                .orElseThrow(() -> new IllegalStateException("Episode topilmadi: id=" + id));
     }
 }
