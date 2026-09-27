@@ -1,6 +1,6 @@
 package com.moviebot.bot.bot;
 
-import com.moviebot.bot.domain.Keyboards;
+import com.moviebot.bot.domain.Episode;
 import com.moviebot.bot.domain.Movie;
 import com.moviebot.bot.domain.PendingMovie;
 import com.moviebot.bot.domain.Season;
@@ -88,6 +88,24 @@ public class MovieBot extends TelegramLongPollingBot {
             if (data.startsWith("MOVIE:")) {
                 String code = data.substring("MOVIE:".length());
                 sendMovieByCode(chatId, code);
+                return;
+            }
+
+            if (data.startsWith("SERIES:")) {
+                String code = data.substring("SERIES:".length());
+                movieService.findByCode(code).ifPresent(m -> sendSeasonList(chatId, m));
+                return;
+            }
+
+            if (data.startsWith("SEASON:")) {
+                Long seasonId = Long.parseLong(data.substring("SEASON:".length()));
+                sendEpisodeList(chatId, seasonId);
+                return;
+            }
+
+            if (data.startsWith("EPISODE:")) {
+                Long episodeId = Long.parseLong(data.substring("EPISODE:".length()));
+                sendEpisodeVideo(chatId, episodeId);
                 return;
             }
 
@@ -530,6 +548,14 @@ public class MovieBot extends TelegramLongPollingBot {
 
         Movie movie = movieOpt.get();
 
+        if (movie.getType() == MovieType.MOVIE) {
+            sendMovieVideo(chatId, movie);
+        } else {
+            sendSeasonList(chatId, movie);
+        }
+    }
+
+    private void sendMovieVideo(long chatId, Movie movie) {
         if (movie.getFileId() == null) {
             SendMessage message = new SendMessage(String.valueOf(chatId),
                     movie.getTitle() + "\n\n" + movie.getDescription() + "\n\n(Video hali yuklanmagan)");
@@ -548,6 +574,63 @@ public class MovieBot extends TelegramLongPollingBot {
         video.setVideo(new InputFile(movie.getFileId()));
         video.setCaption(movie.getTitle() + "\n\n" + movie.getDescription());
         video.setReplyMarkup(Keyboards.backToUserMenu());
+
+        try {
+            execute(video);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendSeasonList(long chatId, Movie movie) {
+        List<Season> seasons = seasonService.getSeasonsForMovie(movie.getId());
+
+        if (seasons.isEmpty()) {
+            SendMessage message = new SendMessage(String.valueOf(chatId),
+                    movie.getTitle() + "\n\n" + movie.getDescription() + "\n\n(Hali qismlar yuklanmagan)");
+            message.setReplyMarkup(Keyboards.backToUserMenu());
+
+            try {
+                execute(message);
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), movie.getTitle() + "\n\nFaslni tanlang:");
+        message.setReplyMarkup(Keyboards.seasonListMenu(seasons));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendEpisodeList(long chatId, Long seasonId) {
+        Season season = seasonService.getById(seasonId);
+        List<Episode> episodes = episodeService.getEpisodesForSeason(seasonId);
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), season.getSeasonNumber() + "-fasl. Qismni tanlang:");
+        message.setReplyMarkup(Keyboards.episodeListMenu(episodes, season.getMovie().getCode()));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendEpisodeVideo(long chatId, Long episodeId) {
+        Episode episode = episodeService.getById(episodeId);
+        Season season = episode.getSeason();
+
+        SendVideo video = new SendVideo();
+        video.setChatId(String.valueOf(chatId));
+        video.setVideo(new InputFile(episode.getFileId()));
+        video.setCaption(season.getMovie().getTitle() + "\n" + season.getSeasonNumber() + "-fasl, " + episode.getEpisodeNumber() + "-qism");
+        video.setReplyMarkup(Keyboards.backToSeasonMenu(season.getId()));
 
         try {
             execute(video);

@@ -1,5 +1,8 @@
-package com.moviebot.bot.domain;
+package com.moviebot.bot.bot;
 
+import com.moviebot.bot.domain.Episode;
+import com.moviebot.bot.domain.Movie;
+import com.moviebot.bot.domain.Season;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 
@@ -98,6 +101,36 @@ public class Keyboards {
     public static InlineKeyboardMarkup backToUserMenu() {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup seasonListMenu(List<Season> seasons) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        for (Season s : seasons) {
+            rows.add(List.of(button(s.getSeasonNumber() + "-fasl", "SEASON:" + s.getId())));
+        }
+
+        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup episodeListMenu(List<Episode> episodes, String movieCode) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        for (Episode e : episodes) {
+            rows.add(List.of(button(e.getEpisodeNumber() + "-qism", "EPISODE:" + e.getId())));
+        }
+
+        rows.add(List.of(button("🔙 Fasllarga", "SERIES:" + movieCode)));
+
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup backToSeasonMenu(Long seasonId) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("🔙 Qismlarga", "SEASON:" + seasonId)));
         return new InlineKeyboardMarkup(rows);
     }
 

@@ -5,6 +5,8 @@ import com.moviebot.bot.domain.Season;
 import com.moviebot.bot.repo.SeasonRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class SeasonService {
 
@@ -26,5 +28,9 @@ public class SeasonService {
     public Season getById(Long id) {
         return seasonRepository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("Season topilmadi: id=" + id));
+    }
+
+    public List<Season> getSeasonsForMovie(Long movieId) {
+        return seasonRepository.findByMovieIdOrderBySeasonNumber(movieId);
     }
 }
