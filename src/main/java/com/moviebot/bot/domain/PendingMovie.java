@@ -18,6 +18,12 @@ public class PendingMovie {
     private String description;
     private String editingCode;
 
-    public boolean isEditing() { return editingCode != null; }
+    private Long movieId;
+    private Integer seasonCount;
+    private Integer currentSeasonNumber;
+    private Long currentSeasonId;
+    private Integer episodeCountForCurrentSeason;
+    private Integer currentEpisodeNumber;
 
+    public boolean isEditing() { return editingCode != null; }
 }

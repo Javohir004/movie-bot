@@ -75,4 +75,30 @@ public class Keyboards {
         button.setCallbackData(callbackData);
         return button;
     }
+
+    public static InlineKeyboardMarkup userMainMenu() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("🔍 Qidirish", "USER:SEARCH")));
+        rows.add(List.of(button("📽 Barchasini ko'rish", "USER:LIST_ALL")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup userMovieListMenu(List<Movie> movies) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        for (Movie m : movies) {
+            rows.add(List.of(button(m.getCode() + " — " + m.getTitle(), "MOVIE:" + m.getCode())));
+        }
+
+        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup backToUserMenu() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
 }

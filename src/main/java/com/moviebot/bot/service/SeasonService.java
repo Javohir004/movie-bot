@@ -1,6 +1,5 @@
 package com.moviebot.bot.service;
 
-
 import com.moviebot.bot.domain.Movie;
 import com.moviebot.bot.domain.Season;
 import com.moviebot.bot.repo.SeasonRepository;
