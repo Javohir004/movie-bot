@@ -91,4 +91,9 @@ public class MovieService {
             movieRepository.save(movie);
         });
     }
+
+    public void updatePoster(Movie movie, String posterFileId) {
+        movie.setPosterFileId(posterFileId);
+        movieRepository.save(movie);
+    }
 }
