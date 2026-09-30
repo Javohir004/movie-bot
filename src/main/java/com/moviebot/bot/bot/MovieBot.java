@@ -428,6 +428,7 @@ public class MovieBot extends TelegramLongPollingBot {
         sendText(chatId, "Noma'lum admin buyrug'i.");
     }
 
+
     private void handleAddAdmin(long chatId, String text) {
         String[] parts = text.trim().split("\\s+");
 
