@@ -20,6 +20,13 @@ public class User {
     @Column(name = "user_id", unique = true, nullable = false)
     private Long userId;
 
+    @Column(name = "first_name")
+    private String firstName;
+
     @Enumerated(EnumType.STRING)
     private Role role;
+
+    @Builder.Default
+    @Column(name = "is_active", nullable = false)
+    private boolean active = true;
 }

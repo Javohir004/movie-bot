@@ -1,15 +1,10 @@
 package com.moviebot.bot.bot;
 
-import com.moviebot.bot.domain.Episode;
-import com.moviebot.bot.domain.Movie;
-import com.moviebot.bot.domain.PendingMovie;
-import com.moviebot.bot.domain.Season;
+import com.moviebot.bot.domain.*;
 import com.moviebot.bot.enums.AdminState;
+import com.moviebot.bot.enums.InviteStatus;
 import com.moviebot.bot.enums.MovieType;
-import com.moviebot.bot.service.EpisodeService;
-import com.moviebot.bot.service.MovieService;
-import com.moviebot.bot.service.SeasonService;
-import com.moviebot.bot.service.UserService;
+import com.moviebot.bot.service.*;
 import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -37,29 +32,36 @@ public class MovieBot extends TelegramLongPollingBot {
     private final AdminSessionManager sessionManager;
     private final SeasonService seasonService;
     private final EpisodeService episodeService;
+    private final AdminInviteService adminInviteService;
+    private final Long rootAdminId;
+
+
 
     public MovieBot(@Value("${bot.token}") String token,
                     @Value("${bot.username}") String username,
+                    @Value("${bot.root-admin-id}") Long rootAdminId,
                     MovieService movieService,
                     UserService userService,
                     AdminSessionManager sessionManager,
                     SeasonService seasonService,
-                    EpisodeService episodeService) {
+                    EpisodeService episodeService,
+                    AdminInviteService adminInviteService) {
         super(token);
         this.username = username;
+        this.rootAdminId = rootAdminId;
         this.movieService = movieService;
         this.userService = userService;
         this.sessionManager = sessionManager;
         this.seasonService = seasonService;
         this.episodeService = episodeService;
+        this.adminInviteService = adminInviteService;
     }
+
 
     @Override
     public String getBotUsername() {
         return username;
     }
-
-
 
     @Override
     public void onUpdateReceived(Update update) {
@@ -71,7 +73,6 @@ public class MovieBot extends TelegramLongPollingBot {
         }
 
     }
-
 
     private void processUpdate(Update update) {
         if (update.hasCallbackQuery()) {
@@ -137,6 +138,18 @@ public class MovieBot extends TelegramLongPollingBot {
                 return;
             }
 
+            if (data.startsWith("INVITEOK:")) {
+                Long inviteId = Long.parseLong(data.substring("INVITEOK:".length()));
+                handleInviteConfirm(chatId, userId, inviteId);
+                return;
+            }
+
+            if (data.startsWith("INVITENO:")) {
+                Long inviteId = Long.parseLong(data.substring("INVITENO:".length()));
+                handleInviteReject(chatId, userId, inviteId);
+                return;
+            }
+
             if (userService.isAdmin(userId)) {
                 handleAdminCallback(chatId, userId, data);
             }
@@ -194,11 +207,18 @@ public class MovieBot extends TelegramLongPollingBot {
             long chatId = update.getMessage().getChatId();
             String text = update.getMessage().getText();
 
-            userService.registerIfAbsent(userId);
+            String firstName = update.getMessage().getFrom().getFirstName();
+            userService.registerOrUpdateName(userId, firstName);
 
-            if (text.equals("/start")) {
+            if (text.startsWith("/start")) {
+                String[] startParts = text.trim().split("\\s+", 2);
+
+                if (startParts.length > 1) {
+                    handleInviteStart(chatId, userId, firstName, startParts[1]);
+                    return;
+                }
+
                 if (userService.isAdmin(userId)) {
-                    String firstName = update.getMessage().getFrom().getFirstName();
                     sendText(chatId, "Salom, " + firstName + "! Xush kelibsiz.");
                     sendAdminMenu(chatId);
                 } else {
@@ -248,14 +268,27 @@ public class MovieBot extends TelegramLongPollingBot {
         }
 
         if (data.equals("ADMIN:ADD_ADMIN")) {
-            SendMessage message = new SendMessage(String.valueOf(chatId), "Yozing: /addadmin <telegram_id>");
-            message.setReplyMarkup(Keyboards.backOnly());
+            AdminInvite invite = adminInviteService.createInvite(userId);
+            String link = "https://t.me/" + username + "?start=" + invite.getToken();
 
-            try {
-                execute(message);
-            } catch (TelegramApiException e) {
-                e.printStackTrace();
-            }
+            sendText(chatId, "Yangi admin qo'shish uchun havola (10 daqiqa amal qiladi):\n\n"
+                    + link
+                    + "\n\nUshbu havolani kerakli odamga yuboring. U bosgandan keyin sizga tasdiqlash so'rovi keladi.");
+            return;
+        }
+
+        if (data.equals("ADMIN:LIST_ADMINS")) {
+            sendAdminList(chatId);
+            return;
+        }
+
+        if (data.equals("NOOP")) {
+            return;
+        }
+
+        if (data.startsWith("REMOVEADMIN:")) {
+            Long targetId = Long.parseLong(data.substring("REMOVEADMIN:".length()));
+            handleRemoveAdmin(chatId, userId, targetId);
             return;
         }
 
@@ -420,14 +453,8 @@ public class MovieBot extends TelegramLongPollingBot {
     }
 
     private void handleAdminCommand(long chatId, long userId, String text) {
-        if (text.startsWith("/addadmin")) {
-            handleAddAdmin(chatId, text);
-            return;
-        }
-
-        sendText(chatId, "Noma'lum admin buyrug'i.");
+        sendText(chatId, "Noma'lum admin buyrug'i. Admin panel orqali foydalaning.");
     }
-
 
     private void handleAddAdmin(long chatId, String text) {
         String[] parts = text.trim().split("\\s+");
@@ -500,6 +527,23 @@ public class MovieBot extends TelegramLongPollingBot {
         askEpisodeCount(chatId, userId);
     }
 
+    private void handleInviteStart(long chatId, long userId, String firstName, String token) {
+        Optional<AdminInvite> inviteOpt = adminInviteService.findValidPendingInvite(token);
+
+        if (inviteOpt.isEmpty()) {
+            sendText(chatId, "Havola yaroqsiz yoki muddati tugagan.");
+            return;
+        }
+
+        AdminInvite invite = inviteOpt.get();
+        adminInviteService.markAwaitingConfirmation(invite, userId, firstName);
+
+        sendText(chatId, "So'rovingiz yuborildi. Admin tasdiqlashini kuting.");
+
+        String notifyText = "👤 " + firstName + " (id: " + userId + ") sizning havolangiz orqali admin bo'lishni so'ramoqda.\n\nTasdiqlaysizmi?";
+        sendTextWithMarkup(invite.getCreatedByUserId(), notifyText, Keyboards.inviteConfirmMenu(invite.getId()));
+    }
+
     private void proceedAfterPoster(long chatId, long userId) {
         PendingMovie pending = sessionManager.getPendingMovie(userId);
 
@@ -519,6 +563,76 @@ public class MovieBot extends TelegramLongPollingBot {
             pending.setCurrentSeasonNumber(1);
             askSeasonCount(chatId, userId);
         }
+    }
+
+    private void handleInviteConfirm(long chatId, long userId, Long inviteId) {
+        Optional<AdminInvite> inviteOpt = adminInviteService.findById(inviteId);
+
+        if (inviteOpt.isEmpty()) {
+            sendText(chatId, "So'rov topilmadi.");
+            return;
+        }
+
+        AdminInvite invite = inviteOpt.get();
+
+        if (!invite.getCreatedByUserId().equals(userId)) {
+            sendText(chatId, "Bu so'rov sizga tegishli emas.");
+            return;
+        }
+
+        if (invite.getStatus() != InviteStatus.AWAITING_CONFIRMATION) {
+            sendText(chatId, "Bu so'rov allaqachon hal qilingan.");
+            return;
+        }
+
+        userService.makeAdmin(invite.getTargetUserId());
+        adminInviteService.confirm(invite);
+
+        sendText(chatId, "✅ " + invite.getTargetName() + " admin qilindi.");
+        sendAdminMenu(chatId);
+        sendText(invite.getTargetUserId(), "🎉 Tabriklaymiz! Siz endi administrator. /start bosing.");
+    }
+
+    private void handleInviteReject(long chatId, long userId, Long inviteId) {
+        Optional<AdminInvite> inviteOpt = adminInviteService.findById(inviteId);
+
+        if (inviteOpt.isEmpty()) {
+            sendText(chatId, "So'rov topilmadi.");
+            return;
+        }
+
+        AdminInvite invite = inviteOpt.get();
+
+        if (!invite.getCreatedByUserId().equals(userId)) {
+            sendText(chatId, "Bu so'rov sizga tegishli emas.");
+            return;
+        }
+
+        if (invite.getStatus() != InviteStatus.AWAITING_CONFIRMATION) {
+            sendText(chatId, "Bu so'rov allaqachon hal qilingan.");
+            return;
+        }
+
+        adminInviteService.reject(invite);
+
+        sendText(chatId, "❌ Rad etildi.");
+        sendText(invite.getTargetUserId(), "So'rovingiz admin tomonidan rad etildi.");
+    }
+
+    private void handleRemoveAdmin(long chatId, long userId, Long targetId) {
+        if (targetId.equals(rootAdminId)) {
+            sendText(chatId, "Asosiy adminni olib tashlab bo'lmaydi.");
+            return;
+        }
+
+        if (targetId == userId) {
+            sendText(chatId, "O'zingizni adminlikdan olib tashlay olmaysiz.");
+            return;
+        }
+
+        userService.makeUser(targetId);
+        sendText(chatId, "✅ Foydalanuvchi adminlikdan olindi.");
+        sendAdminList(chatId);
     }
 
 
@@ -732,6 +846,19 @@ public class MovieBot extends TelegramLongPollingBot {
         }
     }
 
+    private void sendAdminList(long chatId) {
+        List<User> admins = userService.getAllAdmins();
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Adminlar ro'yxati:");
+        message.setReplyMarkup(Keyboards.adminListMenu(admins, rootAdminId));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void sendChoices(long chatId, List<Movie> movies) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
@@ -839,6 +966,17 @@ public class MovieBot extends TelegramLongPollingBot {
 
     private void sendText(long chatId, String text) {
         SendMessage message = new SendMessage(String.valueOf(chatId), text);
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendTextWithMarkup(long chatId, String text, InlineKeyboardMarkup markup) {
+        SendMessage message = new SendMessage(String.valueOf(chatId), text);
+        message.setReplyMarkup(markup);
+
         try {
             execute(message);
         } catch (TelegramApiException e) {

@@ -6,6 +6,9 @@ import com.moviebot.bot.enums.Role;
 import com.moviebot.bot.repo.UserRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+import java.util.Optional;
+
 @Service
 public class UserService {
 
@@ -44,5 +47,39 @@ public class UserService {
                     userRepository.save(newAdmin);
                 }
         );
+    }
+
+    public void registerOrUpdateName(Long userId, String firstName) {
+        userRepository.findByUserId(userId).ifPresentOrElse(
+                user -> {
+                    if (firstName != null && !firstName.equals(user.getFirstName())) {
+                        user.setFirstName(firstName);
+                        userRepository.save(user);
+                    }
+                },
+                () -> {
+                    User user = User.builder()
+                            .userId(userId)
+                            .firstName(firstName)
+                            .role(Role.USER)
+                            .build();
+                    userRepository.save(user);
+                }
+        );
+    }
+
+    public List<User> getAllAdmins() {
+        return userRepository.findByRole(Role.ADMIN);
+    }
+
+    public void makeUser(Long userId) {
+        userRepository.findByUserId(userId).ifPresent(user -> {
+            user.setRole(Role.USER);
+            userRepository.save(user);
+        });
+    }
+
+    public Optional<User> findByUserId(Long userId) {
+        return userRepository.findByUserId(userId);
     }
 }
