@@ -3,6 +3,7 @@ package com.moviebot.bot.bot;
 import com.moviebot.bot.domain.Episode;
 import com.moviebot.bot.domain.Movie;
 import com.moviebot.bot.domain.Season;
+import com.moviebot.bot.domain.User;
 import com.moviebot.bot.enums.MovieType;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
@@ -17,6 +18,7 @@ public class Keyboards {
         rows.add(List.of(button("🎬 Kino/serial qo'shish", "ADMIN:ADD_MOVIE")));
         rows.add(List.of(button("📋 Ro'yxat", "ADMIN:LIST_MOVIES")));
         rows.add(List.of(button("👤 Admin qo'shish", "ADMIN:ADD_ADMIN")));
+        rows.add(List.of(button("👥 Adminlar ro'yxati", "ADMIN:LIST_ADMINS")));
         return new InlineKeyboardMarkup(rows);
     }
 
@@ -173,6 +175,35 @@ public class Keyboards {
         }
 
         rows.add(List.of(button("🔙 Qismlarga", "SEASON:" + seasonId)));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup inviteConfirmMenu(Long inviteId) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(
+                button("✅ Tasdiqlash", "INVITEOK:" + inviteId),
+                button("❌ Rad etish", "INVITENO:" + inviteId)
+        ));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup adminListMenu(List<User> admins, Long rootAdminId) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        for (User admin : admins) {
+            String name = admin.getFirstName() != null ? admin.getFirstName() : String.valueOf(admin.getUserId());
+
+            if (admin.getUserId().equals(rootAdminId)) {
+                rows.add(List.of(button("👑 " + name, "NOOP")));
+            } else {
+                rows.add(List.of(
+                        button(name, "NOOP"),
+                        button("❌ Olib tashlash", "REMOVEADMIN:" + admin.getUserId())
+                ));
+            }
+        }
+
+        rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
         return new InlineKeyboardMarkup(rows);
     }
 }
