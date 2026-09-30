@@ -26,8 +26,14 @@ public class Season {
     @Column(name = "season_number", nullable = false)
     private Integer seasonNumber;
 
+    @Column(name = "poster_file_id")
+    private String posterFileId;
+
+    @Builder.Default
+    @Column(name = "view_count", nullable = false)
+    private int viewCount = 0;
+
     @Builder.Default
     @OneToMany(mappedBy = "season", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Episode> episodes = new ArrayList<>();
-
 }

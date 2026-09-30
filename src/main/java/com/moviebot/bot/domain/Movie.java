@@ -7,13 +7,12 @@ import lombok.*;
 import java.util.ArrayList;
 import java.util.List;
 
-
 @Entity
 @Table(name = "movies")
 @Getter
 @Setter
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor
 @Builder
 public class Movie {
 
@@ -34,6 +33,13 @@ public class Movie {
 
     @Column(name = "file_id")
     private String fileId;
+
+    @Column(name = "poster_file_id")
+    private String posterFileId;
+
+    @Builder.Default
+    @Column(name = "view_count", nullable = false)
+    private int viewCount = 0;
 
     @Builder.Default
     @Column(name = "is_active", nullable = false)
