@@ -34,13 +34,14 @@ public class MovieService {
                 .orElseThrow(() -> new IllegalStateException("Movie topilmadi: id=" + id));
     }
 
-    public void save(String title, String code, MovieType type, String description, String fileId) {
+    public void save(String title, String code, MovieType type, String description, String fileId, String posterFileId) {
         Movie movie = Movie.builder()
                 .title(title)
                 .code(code)
                 .type(type)
                 .description(description)
                 .fileId(fileId)
+                .posterFileId(posterFileId)
                 .active(true)
                 .build();
 
@@ -59,7 +60,8 @@ public class MovieService {
         return movieRepository.save(movie);
     }
 
-    public void update(String originalCode, String title, String code, MovieType type, String description, String fileId) {
+    public void update(String originalCode, String title, String code, MovieType type, String description,
+                       String fileId, String posterFileId) {
         Movie movie = movieRepository.findByCodeAndActiveTrue(originalCode)
                 .orElseThrow(() -> new IllegalStateException("Movie topilmadi: " + originalCode));
 
@@ -71,7 +73,15 @@ public class MovieService {
         if (fileId != null) {
             movie.setFileId(fileId);
         }
+        if (posterFileId != null) {
+            movie.setPosterFileId(posterFileId);
+        }
 
+        movieRepository.save(movie);
+    }
+
+    public void incrementViewCount(Movie movie) {
+        movie.setViewCount(movie.getViewCount() + 1);
         movieRepository.save(movie);
     }
 
@@ -81,6 +91,4 @@ public class MovieService {
             movieRepository.save(movie);
         });
     }
-
-
 }

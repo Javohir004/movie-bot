@@ -6,6 +6,7 @@ import com.moviebot.bot.repo.EpisodeRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class EpisodeService {
@@ -33,5 +34,9 @@ public class EpisodeService {
     public Episode getById(Long id) {
         return episodeRepository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("Episode topilmadi: id=" + id));
+    }
+
+    public Optional<Episode> findBySeasonAndEpisodeNumber(Long seasonId, int episodeNumber) {
+        return episodeRepository.findBySeasonIdAndEpisodeNumber(seasonId, episodeNumber);
     }
 }

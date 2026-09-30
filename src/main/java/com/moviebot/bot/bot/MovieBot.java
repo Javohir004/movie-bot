@@ -10,10 +10,12 @@ import com.moviebot.bot.service.EpisodeService;
 import com.moviebot.bot.service.MovieService;
 import com.moviebot.bot.service.SeasonService;
 import com.moviebot.bot.service.UserService;
+import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -35,10 +37,13 @@ public class MovieBot extends TelegramLongPollingBot {
     private final SeasonService seasonService;
     private final EpisodeService episodeService;
 
-
     public MovieBot(@Value("${bot.token}") String token,
                     @Value("${bot.username}") String username,
-                    MovieService movieService, UserService userService, AdminSessionManager sessionManager, SeasonService seasonService, EpisodeService episodeService) {
+                    MovieService movieService,
+                    UserService userService,
+                    AdminSessionManager sessionManager,
+                    SeasonService seasonService,
+                    EpisodeService episodeService) {
         super(token);
         this.username = username;
         this.movieService = movieService;
@@ -71,7 +76,6 @@ public class MovieBot extends TelegramLongPollingBot {
             if (data.equals("USER:SEARCH")) {
                 SendMessage message = new SendMessage(String.valueOf(chatId), "Kino nomi yoki kodini yozing:");
                 message.setReplyMarkup(Keyboards.backToUserMenu());
-
                 try {
                     execute(message);
                 } catch (TelegramApiException e) {
@@ -82,6 +86,12 @@ public class MovieBot extends TelegramLongPollingBot {
 
             if (data.equals("USER:LIST_ALL")) {
                 sendUserMovieList(chatId);
+                return;
+            }
+
+            if (data.startsWith("WATCHMOVIE:")) {
+                String code = data.substring("WATCHMOVIE:".length());
+                sendActualMovieVideo(chatId, code);
                 return;
             }
 
@@ -116,6 +126,26 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
+        if (update.hasMessage() && update.getMessage().hasPhoto()) {
+            long userId = update.getMessage().getFrom().getId();
+            long chatId = update.getMessage().getChatId();
+
+            if (userService.isAdmin(userId)) {
+                AdminState state = sessionManager.getState(userId);
+                List<PhotoSize> photos = update.getMessage().getPhoto();
+                String fileId = photos.get(photos.size() - 1).getFileId();
+
+                if (state == AdminState.AWAITING_POSTER) {
+                    handleMoviePoster(chatId, userId, fileId);
+                } else if (state == AdminState.AWAITING_SEASON_POSTER) {
+                    handleSeasonPoster(chatId, userId, fileId);
+                } else if (state == AdminState.AWAITING_SEASON_POSTER_EDIT) {
+                    handleSeasonPosterEdit(chatId, userId, fileId);
+                }
+            }
+            return;
+        }
+
         if (update.hasMessage() && update.getMessage().hasVideo()) {
             long userId = update.getMessage().getFrom().getId();
             long chatId = update.getMessage().getChatId();
@@ -128,6 +158,8 @@ public class MovieBot extends TelegramLongPollingBot {
                     finishAddMovie(chatId, userId, fileId);
                 } else if (state == AdminState.AWAITING_EPISODE_VIDEO) {
                     handleEpisodeVideo(chatId, userId, fileId);
+                } else if (state == AdminState.AWAITING_NEW_EPISODE_VIDEO) {
+                    handleNewEpisodeVideo(chatId, userId, fileId);
                 }
             }
             return;
@@ -219,6 +251,34 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
+        if (data.startsWith("ADDSEASON:")) {
+            startAddSeasonFlow(chatId, userId, data.substring("ADDSEASON:".length()));
+            return;
+        }
+
+        if (data.startsWith("ADMIN_SEASONS:")) {
+            startManageSeasonsFlow(chatId, data.substring("ADMIN_SEASONS:".length()));
+            return;
+        }
+
+        if (data.startsWith("SEASONMANAGE:")) {
+            Long seasonId = Long.parseLong(data.substring("SEASONMANAGE:".length()));
+            sendSeasonManageMenu(chatId, seasonId);
+            return;
+        }
+
+        if (data.startsWith("SEASONPOSTER:")) {
+            Long seasonId = Long.parseLong(data.substring("SEASONPOSTER:".length()));
+            startEditSeasonPosterFlow(chatId, userId, seasonId);
+            return;
+        }
+
+        if (data.startsWith("ADDEPISODE:")) {
+            Long seasonId = Long.parseLong(data.substring("ADDEPISODE:".length()));
+            startAddSingleEpisodeFlow(chatId, userId, seasonId);
+            return;
+        }
+
         if (data.startsWith("EDIT:")) {
             startEditMovieFlow(chatId, userId, data.substring("EDIT:".length()));
             return;
@@ -257,14 +317,18 @@ public class MovieBot extends TelegramLongPollingBot {
                 pending.setDescription(text.trim());
 
                 if (pending.getType() == MovieType.MOVIE) {
-                    askVideo(chatId, userId);
+                    askPoster(chatId, userId);
+                } else if (pending.isEditing()) {
+                    finishAddMovie(chatId, userId, null);
                 } else {
                     Movie movie = movieService.saveWithoutVideo(
                             pending.getTitle(), pending.getCode(), pending.getType(), pending.getDescription());
                     pending.setMovieId(movie.getId());
+                    pending.setCurrentSeasonNumber(1);
                     askSeasonCount(chatId, userId);
                 }
             }
+            case AWAITING_POSTER -> sendText(chatId, "Iltimos, rasm (poster) yuboring.");
             case AWAITING_VIDEO -> {
                 if (pending.isEditing() && text.trim().equalsIgnoreCase("/skip")) {
                     finishAddMovie(chatId, userId, null);
@@ -278,19 +342,20 @@ public class MovieBot extends TelegramLongPollingBot {
                     if (count < 1) throw new NumberFormatException();
 
                     pending.setSeasonCount(count);
-                    pending.setCurrentSeasonNumber(1);
-                    askEpisodeCount(chatId, userId);
+                    pending.setSeasonsProcessed(0);
+                    askSeasonPoster(chatId, userId);
                 } catch (NumberFormatException e) {
                     sendText(chatId, "Iltimos, musbat butun son kiriting (masalan 3):");
                 }
             }
+            case AWAITING_SEASON_POSTER -> sendText(chatId, "Iltimos, rasm (poster) yuboring.");
             case AWAITING_EPISODE_COUNT -> {
                 try {
                     int count = Integer.parseInt(text.trim());
                     if (count < 1) throw new NumberFormatException();
 
                     Movie movie = movieService.getById(pending.getMovieId());
-                    Season season = seasonService.create(movie, pending.getCurrentSeasonNumber());
+                    Season season = seasonService.create(movie, pending.getCurrentSeasonNumber(), pending.getSeasonPosterFileId());
 
                     pending.setEpisodeCountForCurrentSeason(count);
                     pending.setCurrentSeasonId(season.getId());
@@ -319,15 +384,17 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
-        int nextSeason = pending.getCurrentSeasonNumber() + 1;
+        int seasonsProcessed = pending.getSeasonsProcessed() + 1;
 
-        if (nextSeason <= pending.getSeasonCount()) {
-            pending.setCurrentSeasonNumber(nextSeason);
-            askEpisodeCount(chatId, userId);
+        if (seasonsProcessed < pending.getSeasonCount()) {
+            pending.setSeasonsProcessed(seasonsProcessed);
+            pending.setCurrentSeasonNumber(pending.getCurrentSeasonNumber() + 1);
+            pending.setSeasonPosterFileId(null);
+            askSeasonPoster(chatId, userId);
             return;
         }
 
-        sendText(chatId, "✅ \"" + pending.getTitle() + "\" barcha fasl va qismlari bilan qo'shildi!");
+        sendText(chatId, "✅ \"" + pending.getTitle() + "\" uchun fasl/qismlar qo'shildi!");
         sessionManager.clear(userId);
         sendAdminMenu(chatId);
     }
@@ -378,6 +445,30 @@ public class MovieBot extends TelegramLongPollingBot {
         }
     }
 
+    private void handleSeasonPosterEdit(long chatId, long userId, String fileId) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        Season season = seasonService.getById(pending.getCurrentSeasonId());
+
+        seasonService.updatePoster(season, fileId);
+
+        sessionManager.clear(userId);
+        sendText(chatId, "✅ Poster yangilandi.");
+        sendSeasonManageMenu(chatId, season.getId());
+    }
+
+    private void handleNewEpisodeVideo(long chatId, long userId, String fileId) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        Season season = seasonService.getById(pending.getCurrentSeasonId());
+
+        episodeService.create(season, pending.getCurrentEpisodeNumber(), fileId);
+
+        sessionManager.clear(userId);
+        sendText(chatId, "✅ " + pending.getCurrentEpisodeNumber() + "-qism qo'shildi!");
+        sendSeasonManageMenu(chatId, season.getId());
+    }
+
+
+
 
     ///  start..
     private void startAddMovieFlow(long chatId, long userId) {
@@ -406,6 +497,77 @@ public class MovieBot extends TelegramLongPollingBot {
         askTitle(chatId, userId);
     }
 
+    private void startAddSeasonFlow(long chatId, long userId, String code) {
+        Optional<Movie> movieOpt = movieService.findByCode(code);
+
+        if (movieOpt.isEmpty()) {
+            sendText(chatId, "Kino topilmadi.");
+            return;
+        }
+
+        Movie movie = movieOpt.get();
+        int existingSeasons = seasonService.countSeasonsForMovie(movie.getId());
+
+        sessionManager.clear(userId);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        pending.setMovieId(movie.getId());
+        pending.setCode(movie.getCode());
+        pending.setTitle(movie.getTitle());
+        pending.setSeasonAdditionOnly(true);
+        pending.setCurrentSeasonNumber(existingSeasons + 1);
+
+        sendText(chatId, "\"" + movie.getTitle() + "\" uchun nechta yangi fasl qo'shmoqchisiz?");
+        sessionManager.setState(userId, AdminState.AWAITING_SEASON_COUNT);
+    }
+
+    private void startManageSeasonsFlow(long chatId, String movieCode) {
+        Optional<Movie> movieOpt = movieService.findByCode(movieCode);
+
+        if (movieOpt.isEmpty()) {
+            sendText(chatId, "Kino topilmadi.");
+            return;
+        }
+
+        Movie movie = movieOpt.get();
+        List<Season> seasons = seasonService.getSeasonsForMovie(movie.getId());
+
+        if (seasons.isEmpty()) {
+            sendText(chatId, "Hali fasl qo'shilmagan.");
+            return;
+        }
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Faslni tanlang:");
+        message.setReplyMarkup(Keyboards.seasonManageListMenu(seasons, movie.getCode()));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void startEditSeasonPosterFlow(long chatId, long userId, Long seasonId) {
+        sessionManager.clear(userId);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        pending.setCurrentSeasonId(seasonId);
+        sessionManager.setState(userId, AdminState.AWAITING_SEASON_POSTER_EDIT);
+
+        sendText(chatId, "Yangi poster (rasm) yuboring:");
+    }
+
+    private void startAddSingleEpisodeFlow(long chatId, long userId, Long seasonId) {
+        Season season = seasonService.getById(seasonId);
+        int existingEpisodes = episodeService.getEpisodesForSeason(seasonId).size();
+
+        sessionManager.clear(userId);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        pending.setCurrentSeasonId(seasonId);
+        pending.setCurrentEpisodeNumber(existingEpisodes + 1);
+        sessionManager.setState(userId, AdminState.AWAITING_NEW_EPISODE_VIDEO);
+
+        sendText(chatId, season.getSeasonNumber() + "-fasl, " + (existingEpisodes + 1) + "-qism uchun video yuboring:");
+    }
+
 
     /// .....
     private void goBack(long chatId, long userId) {
@@ -415,8 +577,10 @@ public class MovieBot extends TelegramLongPollingBot {
             case AWAITING_CODE -> askTitle(chatId, userId);
             case AWAITING_TYPE -> askCode(chatId, userId);
             case AWAITING_DESCRIPTION -> askType(chatId, userId);
-            case AWAITING_VIDEO -> askDescription(chatId, userId);
-            case AWAITING_SEASON_COUNT, AWAITING_EPISODE_COUNT, AWAITING_EPISODE_VIDEO -> cancelSeriesCreation(chatId, userId);
+            case AWAITING_POSTER -> askDescription(chatId, userId);
+            case AWAITING_VIDEO -> askPoster(chatId, userId);
+            case AWAITING_SEASON_COUNT, AWAITING_SEASON_POSTER, AWAITING_EPISODE_COUNT, AWAITING_EPISODE_VIDEO ->
+                    cancelSeriesCreation(chatId, userId);
             default -> {
                 sessionManager.clear(userId);
                 sendText(chatId, "Bekor qilindi.");
@@ -428,12 +592,12 @@ public class MovieBot extends TelegramLongPollingBot {
     private void cancelSeriesCreation(long chatId, long userId) {
         PendingMovie pending = sessionManager.getPendingMovie(userId);
 
-        if (pending.getMovieId() != null) {
+        if (pending.getMovieId() != null && !pending.isSeasonAdditionOnly()) {
             movieService.deleteByCode(pending.getCode());
         }
 
         sessionManager.clear(userId);
-        sendText(chatId, "Bekor qilindi, kiritilgan ma'lumotlar o'chirildi.");
+        sendText(chatId, "Bekor qilindi.");
         sendAdminMenu(chatId);
     }
 
@@ -447,7 +611,8 @@ public class MovieBot extends TelegramLongPollingBot {
                     pending.getCode(),
                     pending.getType(),
                     pending.getDescription(),
-                    fileId
+                    fileId,
+                    pending.getPosterFileId()
             );
             sendText(chatId, "✅ \"" + pending.getTitle() + "\" yangilandi!");
         } else {
@@ -456,7 +621,8 @@ public class MovieBot extends TelegramLongPollingBot {
                     pending.getCode(),
                     pending.getType(),
                     pending.getDescription(),
-                    fileId
+                    fileId,
+                    pending.getPosterFileId()
             );
             sendText(chatId, "✅ \"" + pending.getTitle() + "\" muvaffaqiyatli qo'shildi!");
         }
@@ -480,7 +646,7 @@ public class MovieBot extends TelegramLongPollingBot {
                 + movie.getDescription();
 
         SendMessage message = new SendMessage(String.valueOf(chatId), info);
-        message.setReplyMarkup(Keyboards.movieDetailMenu(movie.getCode()));
+        message.setReplyMarkup(Keyboards.movieDetailMenu(movie));   // ← MANA SHU QATOR
 
         try {
             execute(message);
@@ -549,7 +715,7 @@ public class MovieBot extends TelegramLongPollingBot {
         Movie movie = movieOpt.get();
 
         if (movie.getType() == MovieType.MOVIE) {
-            sendMovieVideo(chatId, movie);
+            sendMoviePosterCard(chatId, movie);
         } else {
             sendSeasonList(chatId, movie);
         }
@@ -587,7 +753,7 @@ public class MovieBot extends TelegramLongPollingBot {
 
         if (seasons.isEmpty()) {
             SendMessage message = new SendMessage(String.valueOf(chatId),
-                    movie.getTitle() + "\n\n" + movie.getDescription() + "\n\n(Hali qismlar yuklanmagan)");
+                    movie.getTitle() + "\n\n" + movie.getDescription() + "\n\n(Hali fasllar yuklanmagan)");
             message.setReplyMarkup(Keyboards.backToUserMenu());
 
             try {
@@ -612,11 +778,33 @@ public class MovieBot extends TelegramLongPollingBot {
         Season season = seasonService.getById(seasonId);
         List<Episode> episodes = episodeService.getEpisodesForSeason(seasonId);
 
-        SendMessage message = new SendMessage(String.valueOf(chatId), season.getSeasonNumber() + "-fasl. Qismni tanlang:");
-        message.setReplyMarkup(Keyboards.episodeListMenu(episodes, season.getMovie().getCode()));
+        seasonService.incrementViewCount(season);
+
+        String caption = buildSeasonCaption(season);
+        InlineKeyboardMarkup markup = Keyboards.episodeGridMenu(episodes, season.getMovie().getCode());
+
+        if (season.getPosterFileId() == null) {
+            SendMessage message = new SendMessage(String.valueOf(chatId), caption);
+            message.setParseMode("HTML");
+            message.setReplyMarkup(markup);
+
+            try {
+                execute(message);
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        SendPhoto photo = new SendPhoto();
+        photo.setChatId(String.valueOf(chatId));
+        photo.setPhoto(new InputFile(season.getPosterFileId()));
+        photo.setCaption(caption);
+        photo.setParseMode("HTML");
+        photo.setReplyMarkup(markup);
 
         try {
-            execute(message);
+            execute(photo);
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }
@@ -626,11 +814,16 @@ public class MovieBot extends TelegramLongPollingBot {
         Episode episode = episodeService.getById(episodeId);
         Season season = episode.getSeason();
 
+        Optional<Episode> nextEpisode = episodeService.findBySeasonAndEpisodeNumber(
+                season.getId(), episode.getEpisodeNumber() + 1);
+
+        Long nextEpisodeId = nextEpisode.map(Episode::getId).orElse(null);
+
         SendVideo video = new SendVideo();
         video.setChatId(String.valueOf(chatId));
         video.setVideo(new InputFile(episode.getFileId()));
         video.setCaption(season.getMovie().getTitle() + "\n" + season.getSeasonNumber() + "-fasl, " + episode.getEpisodeNumber() + "-qism");
-        video.setReplyMarkup(Keyboards.backToSeasonMenu(season.getId()));
+        video.setReplyMarkup(Keyboards.episodeVideoMenu(season.getId(), nextEpisodeId));
 
         try {
             execute(video);
@@ -688,6 +881,87 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId),
                 "Salom! Men kino va anime botiman.\n\nKino qidirish yoki barcha kino/seriallarni ko'rish uchun pastdagi tugmalardan foydalaning.");
         message.setReplyMarkup(Keyboards.userMainMenu());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendMoviePosterCard(long chatId, Movie movie) {
+        String caption = buildMovieCaption(movie);
+        InlineKeyboardMarkup markup = Keyboards.moviePosterMenu(movie.getCode());
+
+        if (movie.getPosterFileId() == null) {
+            SendMessage message = new SendMessage(String.valueOf(chatId), caption);
+            message.setParseMode("HTML");
+            message.setReplyMarkup(markup);
+
+            try {
+                execute(message);
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        SendPhoto photo = new SendPhoto();
+        photo.setChatId(String.valueOf(chatId));
+        photo.setPhoto(new InputFile(movie.getPosterFileId()));
+        photo.setCaption(caption);
+        photo.setParseMode("HTML");
+        photo.setReplyMarkup(markup);
+
+        try {
+            execute(photo);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendActualMovieVideo(long chatId, String code) {
+        Optional<Movie> movieOpt = movieService.findByCode(code);
+
+        if (movieOpt.isEmpty()) {
+            sendText(chatId, "Kino topilmadi.");
+            return;
+        }
+
+        Movie movie = movieOpt.get();
+
+        if (movie.getFileId() == null) {
+            SendMessage message = new SendMessage(String.valueOf(chatId), "(Video hali yuklanmagan)");
+            message.setReplyMarkup(Keyboards.backToUserMenu());
+
+            try {
+                execute(message);
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        movieService.incrementViewCount(movie);
+
+        SendVideo video = new SendVideo();
+        video.setChatId(String.valueOf(chatId));
+        video.setVideo(new InputFile(movie.getFileId()));
+        video.setCaption(movie.getTitle());
+        video.setReplyMarkup(Keyboards.backToUserMenu());
+
+        try {
+            execute(video);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendSeasonManageMenu(long chatId, Long seasonId) {
+        Season season = seasonService.getById(seasonId);
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), season.getSeasonNumber() + "-fasl:");
+        message.setReplyMarkup(Keyboards.seasonManageMenu(seasonId, season.getMovie().getCode()));
 
         try {
             execute(message);
@@ -788,4 +1062,72 @@ public class MovieBot extends TelegramLongPollingBot {
         sendText(chatId, pending.getCurrentSeasonNumber() + "-fasl, " + pending.getCurrentEpisodeNumber() + "-qism uchun video yuboring:");
     }
 
+    private void askPoster(long chatId, long userId) {
+        sessionManager.setState(userId, AdminState.AWAITING_POSTER);
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Endi kino uchun poster (rasm) yuboring:");
+        message.setReplyMarkup(Keyboards.backOnly());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void askSeasonPoster(long chatId, long userId) {
+        sessionManager.setState(userId, AdminState.AWAITING_SEASON_POSTER);
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+
+        SendMessage message = new SendMessage(String.valueOf(chatId),
+                pending.getCurrentSeasonNumber() + "-fasl uchun poster (rasm) yuboring:");
+        message.setReplyMarkup(Keyboards.backOnly());
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    private void handleMoviePoster(long chatId, long userId, String fileId) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        pending.setPosterFileId(fileId);
+        askVideo(chatId, userId);
+    }
+
+    private void handleSeasonPoster(long chatId, long userId, String fileId) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        pending.setSeasonPosterFileId(fileId);
+        askEpisodeCount(chatId, userId);
+    }
+
+
+    private String buildMovieCaption(Movie movie) {
+        return "🎬 <b>" + escape(movie.getTitle()) + "</b>\n\n"
+                + "📖 " + escape(movie.getDescription()) + "\n\n"
+                + "👁 Ko'rishlar: " + formatCount(movie.getViewCount()) + "\n"
+                + "🆔 Kodi: " + movie.getCode();
+    }
+
+    private String buildSeasonCaption(Season season) {
+        return "🎬 <b>" + escape(season.getMovie().getTitle()) + "</b>\n"
+                + season.getSeasonNumber() + "-fasl\n\n"
+                + "📖 " + escape(season.getMovie().getDescription()) + "\n\n"
+                + "👁 Ko'rishlar: " + formatCount(season.getViewCount()) + "\n"
+                + "🆔 Kodi: " + season.getMovie().getCode();
+    }
+
+    private String escape(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private String formatCount(int count) {
+        if (count >= 1000) {
+            return String.format("%.1fk", count / 1000.0);
+        }
+        return String.valueOf(count);
+    }
 }
