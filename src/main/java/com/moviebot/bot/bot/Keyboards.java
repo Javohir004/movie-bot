@@ -76,6 +76,7 @@ public class Keyboards {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         rows.add(List.of(button("🔍 Qidirish", "USER:SEARCH")));
         rows.add(List.of(button("📽 Barchasini ko'rish", "USER:LIST_ALL")));
+        rows.add(List.of(button("🔥 Top 5", "USER:TOP")));
         return new InlineKeyboardMarkup(rows);
     }
 
