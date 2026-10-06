@@ -82,4 +82,10 @@ public class UserService {
     public Optional<User> findByUserId(Long userId) {
         return userRepository.findByUserId(userId);
     }
+
+    public List<Long> getAllActiveUserIds() {
+        return userRepository.findAll().stream()
+                .map(User::getUserId)
+                .toList();
+    }
 }
