@@ -31,5 +31,8 @@ public class PendingMovie {
     private Integer seasonsProcessed;
     private boolean seasonAdditionOnly;
 
+    private Long broadcastSourceChatId;
+    private Integer broadcastSourceMessageId;
+
     public boolean isEditing() { return editingCode != null; }
 }

@@ -1,9 +1,6 @@
 package com.moviebot.bot.bot;
 
-import com.moviebot.bot.domain.Episode;
-import com.moviebot.bot.domain.Movie;
-import com.moviebot.bot.domain.Season;
-import com.moviebot.bot.domain.User;
+import com.moviebot.bot.domain.*;
 import com.moviebot.bot.enums.MovieType;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
@@ -19,6 +16,8 @@ public class Keyboards {
         rows.add(List.of(button("📋 Ro'yxat", "ADMIN:LIST_MOVIES")));
         rows.add(List.of(button("👤 Admin qo'shish", "ADMIN:ADD_ADMIN")));
         rows.add(List.of(button("👥 Adminlar ro'yxati", "ADMIN:LIST_ADMINS")));
+        rows.add(List.of(button("📢 Majburiy kanallar", "ADMIN:CHANNELS")));
+        rows.add(List.of(button("📣 Reklama yuborish", "ADMIN:BROADCAST")));
         return new InlineKeyboardMarkup(rows);
     }
 
@@ -204,6 +203,44 @@ public class Keyboards {
         }
 
         rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup subscriptionPromptMenu(List<RequiredChannel> channels) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        for (RequiredChannel c : channels) {
+            InlineKeyboardButton button = new InlineKeyboardButton();
+            button.setText("📢 @" + c.getChannelUsername());
+            button.setUrl("https://t.me/" + c.getChannelUsername());
+            rows.add(List.of(button));
+        }
+
+        rows.add(List.of(button("✅ Tekshirish", "CHECKSUB")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup channelListMenu(List<RequiredChannel> channels) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        for (RequiredChannel c : channels) {
+            rows.add(List.of(
+                    button("@" + c.getChannelUsername(), "NOOP"),
+                    button("❌", "REMOVECHANNEL:" + c.getId())
+            ));
+        }
+
+        rows.add(List.of(button("➕ Kanal qo'shish", "ADMIN:ADD_CHANNEL")));
+        rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup broadcastConfirmMenu() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(
+                button("✅ Yuborish", "BROADCAST:SEND"),
+                button("❌ Bekor qilish", "BROADCAST:CANCEL")
+        ));
         return new InlineKeyboardMarkup(rows);
     }
 }

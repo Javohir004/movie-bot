@@ -5,6 +5,9 @@ import com.moviebot.bot.enums.AdminState;
 import com.moviebot.bot.enums.InviteStatus;
 import com.moviebot.bot.enums.MovieType;
 import com.moviebot.bot.service.*;
+import org.telegram.telegrambots.meta.api.methods.CopyMessage;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
+import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -14,6 +17,7 @@ import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
@@ -33,19 +37,21 @@ public class MovieBot extends TelegramLongPollingBot {
     private final SeasonService seasonService;
     private final EpisodeService episodeService;
     private final AdminInviteService adminInviteService;
+    private final RequiredChannelService requiredChannelService;
     private final Long rootAdminId;
-
-
+    private final String groupLink;
 
     public MovieBot(@Value("${bot.token}") String token,
                     @Value("${bot.username}") String username,
                     @Value("${bot.root-admin-id}") Long rootAdminId,
+                    @Value("${bot.group-link}") String groupLink,
                     MovieService movieService,
                     UserService userService,
                     AdminSessionManager sessionManager,
                     SeasonService seasonService,
                     EpisodeService episodeService,
-                    AdminInviteService adminInviteService) {
+                    AdminInviteService adminInviteService,
+                    RequiredChannelService requiredChannelService) {
         super(token);
         this.username = username;
         this.rootAdminId = rootAdminId;
@@ -55,6 +61,8 @@ public class MovieBot extends TelegramLongPollingBot {
         this.seasonService = seasonService;
         this.episodeService = episodeService;
         this.adminInviteService = adminInviteService;
+        this.requiredChannelService = requiredChannelService;
+        this.groupLink = groupLink;
     }
 
 
@@ -88,6 +96,8 @@ public class MovieBot extends TelegramLongPollingBot {
             }
 
             if (data.equals("USER:SEARCH")) {
+                if (!ensureSubscribed(chatId, userId)) return;
+
                 SendMessage message = new SendMessage(String.valueOf(chatId), "Kino nomi yoki kodini yozing:");
                 message.setReplyMarkup(Keyboards.backToUserMenu());
                 try {
@@ -99,12 +109,23 @@ public class MovieBot extends TelegramLongPollingBot {
             }
 
             if (data.equals("USER:LIST_ALL")) {
+                if (!ensureSubscribed(chatId, userId)) return;
+
                 sendUserMovieList(chatId);
                 return;
             }
 
             if (data.equals("USER:TOP")) {
+                if (!ensureSubscribed(chatId, userId)) return;
+
                 sendTopViewed(chatId);
+                return;
+            }
+
+            if (data.equals("CHECKSUB")) {
+                if (ensureSubscribed(chatId, userId)) {
+                    sendUserStart(chatId);
+                }
                 return;
             }
 
@@ -168,7 +189,9 @@ public class MovieBot extends TelegramLongPollingBot {
                 List<PhotoSize> photos = update.getMessage().getPhoto();
                 String fileId = photos.get(photos.size() - 1).getFileId();
 
-                if (state == AdminState.AWAITING_POSTER) {
+                if (state == AdminState.AWAITING_BROADCAST_CONTENT) {
+                    captureBroadcastContent(chatId, userId, update.getMessage());
+                } else if (state == AdminState.AWAITING_POSTER) {
                     handleMoviePoster(chatId, userId, fileId);
                 } else if (state == AdminState.AWAITING_SEASON_POSTER) {
                     handleSeasonPoster(chatId, userId, fileId);
@@ -189,7 +212,9 @@ public class MovieBot extends TelegramLongPollingBot {
                 AdminState state = sessionManager.getState(userId);
                 String fileId = update.getMessage().getVideo().getFileId();
 
-                if (state == AdminState.AWAITING_VIDEO) {
+                if (state == AdminState.AWAITING_BROADCAST_CONTENT) {
+                    captureBroadcastContent(chatId, userId, update.getMessage());
+                } else if (state == AdminState.AWAITING_VIDEO) {
                     finishAddMovie(chatId, userId, fileId);
                 } else if (state == AdminState.AWAITING_EPISODE_VIDEO) {
                     handleEpisodeVideo(chatId, userId, fileId);
@@ -221,13 +246,17 @@ public class MovieBot extends TelegramLongPollingBot {
                 if (userService.isAdmin(userId)) {
                     sendText(chatId, "Salom, " + firstName + "! Xush kelibsiz.");
                     sendAdminMenu(chatId);
-                } else {
+                } else if (ensureSubscribed(chatId, userId)) {
                     sendUserStart(chatId);
                 }
                 return;
             }
 
             if (userService.isAdmin(userId) && sessionManager.getState(userId) != AdminState.NONE) {
+                if (sessionManager.getState(userId) == AdminState.AWAITING_BROADCAST_CONTENT) {
+                    captureBroadcastContent(chatId, userId, update.getMessage());
+                    return;
+                }
                 handleAdminFlowInput(chatId, userId, text);
                 return;
             }
@@ -239,6 +268,10 @@ public class MovieBot extends TelegramLongPollingBot {
 
             if (text.startsWith("/")) {
                 sendText(chatId, "Bunday buyruq mavjud emas.");
+                return;
+            }
+
+            if (!userService.isAdmin(userId) && !ensureSubscribed(chatId, userId)) {
                 return;
             }
 
@@ -289,6 +322,45 @@ public class MovieBot extends TelegramLongPollingBot {
         if (data.startsWith("REMOVEADMIN:")) {
             Long targetId = Long.parseLong(data.substring("REMOVEADMIN:".length()));
             handleRemoveAdmin(chatId, userId, targetId);
+            return;
+        }
+
+        if (data.equals("ADMIN:CHANNELS")) {
+            sendChannelList(chatId);
+            return;
+        }
+
+        if (data.equals("ADMIN:ADD_CHANNEL")) {
+            sessionManager.clear(userId);
+            sessionManager.setState(userId, AdminState.AWAITING_CHANNEL_USERNAME);
+            sendText(chatId, "Kanal usernameni yuboring (masalan @mychannel).\n\n⚠️ Bot shu kanal/guruhda admin bo'lishi shart, aks holda a'zolikni tekshira olmaydi.");
+            return;
+        }
+
+        if (data.startsWith("REMOVECHANNEL:")) {
+            Long channelId = Long.parseLong(data.substring("REMOVECHANNEL:".length()));
+            requiredChannelService.remove(channelId);
+            sendText(chatId, "✅ Kanal olib tashlandi.");
+            sendChannelList(chatId);
+            return;
+        }
+
+        if (data.equals("ADMIN:BROADCAST")) {
+            sessionManager.clear(userId);
+            sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_CONTENT);
+            sendText(chatId, "Yubormoqchi bo'lgan xabarni (matn, rasm yoki video) yuboring. Bu barcha foydalanuvchilarga yuboriladi.");
+            return;
+        }
+
+        if (data.equals("BROADCAST:SEND")) {
+            executeBroadcast(chatId, userId);
+            return;
+        }
+
+        if (data.equals("BROADCAST:CANCEL")) {
+            sessionManager.clear(userId);
+            sendText(chatId, "Bekor qilindi.");
+            sendAdminMenu(chatId);
             return;
         }
 
@@ -419,6 +491,21 @@ public class MovieBot extends TelegramLongPollingBot {
                 }
             }
             case AWAITING_EPISODE_VIDEO -> sendText(chatId, "Iltimos, video yuboring.");
+            case AWAITING_CHANNEL_USERNAME -> {
+                String cleaned = text.trim()
+                        .replace("https://t.me/", "")
+                        .replace("http://t.me/", "")
+                        .replace("t.me/", "");
+                if (cleaned.startsWith("@")) {
+                    cleaned = cleaned.substring(1);
+                }
+
+                requiredChannelService.addChannel(cleaned);
+                sessionManager.clear(userId);
+                sendText(chatId, "✅ @" + cleaned + " qo'shildi.");
+                sendChannelList(chatId);
+            }
+            case AWAITING_BROADCAST_CONFIRM -> sendText(chatId, "Iltimos, tugmalardan birini bosing.");
             default -> sendText(chatId, "Nimadir xato ketdi. Qaytadan /start bosing.");
         }
     }
@@ -954,7 +1041,8 @@ public class MovieBot extends TelegramLongPollingBot {
         SendVideo video = new SendVideo();
         video.setChatId(String.valueOf(chatId));
         video.setVideo(new InputFile(episode.getFileId()));
-        video.setCaption(season.getMovie().getTitle() + "\n" + season.getSeasonNumber() + "-fasl, " + episode.getEpisodeNumber() + "-qism");
+        video.setCaption(season.getMovie().getTitle() + "\n" + season.getSeasonNumber() + "-fasl, " + episode.getEpisodeNumber() + "-qism"
+                + "\n\n🤖 @" + username);
         video.setReplyMarkup(Keyboards.episodeVideoMenu(season.getId(), nextEpisodeId));
 
         try {
@@ -1100,7 +1188,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendVideo video = new SendVideo();
         video.setChatId(String.valueOf(chatId));
         video.setVideo(new InputFile(movie.getFileId()));
-        video.setCaption(movie.getTitle());
+        video.setCaption(movie.getTitle() + "\n\n🤖 @" + username);
         video.setReplyMarkup(Keyboards.backToUserMenu());
 
         try {
@@ -1285,7 +1373,8 @@ public class MovieBot extends TelegramLongPollingBot {
         return "🎬 <b>" + escape(movie.getTitle()) + "</b>\n\n"
                 + "📖 " + escape(movie.getDescription()) + "\n\n"
                 + "👁 Ko'rishlar: " + formatCount(effectiveViewCount(movie)) + "\n"
-                + "🆔 Kodi: " + movie.getCode();
+                + "🆔 Kodi: " + movie.getCode() + "\n\n"
+                + "📢 Guruhimiz: " + groupLink;
     }
 
     private String buildSeasonCaption(Season season) {
@@ -1293,7 +1382,8 @@ public class MovieBot extends TelegramLongPollingBot {
                 + season.getSeasonNumber() + "-fasl\n\n"
                 + "📖 " + escape(season.getMovie().getDescription()) + "\n\n"
                 + "👁 Ko'rishlar: " + formatCount(season.getViewCount()) + "\n"
-                + "🆔 Kodi: " + season.getMovie().getCode();
+                + "🆔 Kodi: " + season.getMovie().getCode() + "\n\n"
+                + "📢 Guruhimiz: " + groupLink;
     }
 
     private String escape(String text) {
@@ -1307,4 +1397,120 @@ public class MovieBot extends TelegramLongPollingBot {
         }
         return String.valueOf(count);
     }
+
+    private boolean isMemberOf(String channelUsername, long userId) {
+        try {
+            GetChatMember getChatMember = new GetChatMember();
+            getChatMember.setChatId("@" + channelUsername);
+            getChatMember.setUserId(userId);
+            ChatMember member = execute(getChatMember);
+            String status = member.getStatus();
+            return !"left".equals(status) && !"kicked".equals(status);
+        } catch (TelegramApiException e) {
+            return true;
+        }
+    }
+
+    private List<RequiredChannel> getUnjoinedChannels(long userId) {
+        List<RequiredChannel> channels = requiredChannelService.getActiveChannels();
+        List<RequiredChannel> unjoined = new ArrayList<>();
+
+        for (RequiredChannel channel : channels) {
+            if (!isMemberOf(channel.getChannelUsername(), userId)) {
+                unjoined.add(channel);
+            }
+        }
+
+        return unjoined;
+    }
+
+    private boolean ensureSubscribed(long chatId, long userId) {
+        if (userService.isAdmin(userId)) {
+            return true;
+        }
+
+        List<RequiredChannel> unjoined = getUnjoinedChannels(userId);
+
+        if (unjoined.isEmpty()) {
+            return true;
+        }
+
+        SendMessage message = new SendMessage(String.valueOf(chatId),
+                "Botdan foydalanish uchun quyidagi kanal(lar)ga a'zo bo'ling, so'ng \"✅ Tekshirish\" tugmasini bosing:");
+        message.setReplyMarkup(Keyboards.subscriptionPromptMenu(unjoined));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+
+        return false;
+    }
+
+    private void sendChannelList(long chatId) {
+        List<RequiredChannel> channels = requiredChannelService.getActiveChannels();
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Majburiy kanallar:");
+        message.setReplyMarkup(Keyboards.channelListMenu(channels));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void captureBroadcastContent(long chatId, long userId, Message message) {
+        if (message == null) {
+            sendText(chatId, "Iltimos, matn, rasm yoki video yuboring.");
+            return;
+        }
+
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        pending.setBroadcastSourceChatId(chatId);
+        pending.setBroadcastSourceMessageId(message.getMessageId());
+        sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_CONFIRM);
+
+        int count = userService.getAllActiveUserIds().size();
+
+        SendMessage confirm = new SendMessage(String.valueOf(chatId),
+                "Bu xabar " + count + " ta foydalanuvchiga yuboriladi. Tasdiqlaysizmi?");
+        confirm.setReplyMarkup(Keyboards.broadcastConfirmMenu());
+
+        try {
+            execute(confirm);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void executeBroadcast(long chatId, long userId) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        Long sourceChatId = pending.getBroadcastSourceChatId();
+        Integer sourceMessageId = pending.getBroadcastSourceMessageId();
+
+        List<Long> userIds = userService.getAllActiveUserIds();
+        int sent = 0;
+        int failed = 0;
+
+        for (Long targetId : userIds) {
+            try {
+                CopyMessage copyMessage = new CopyMessage();
+                copyMessage.setChatId(String.valueOf(targetId));
+                copyMessage.setFromChatId(String.valueOf(sourceChatId));
+                copyMessage.setMessageId(sourceMessageId);
+                execute(copyMessage);
+                sent++;
+            } catch (TelegramApiException e) {
+                failed++;
+            }
+        }
+
+        sessionManager.clear(userId);
+        sendText(chatId, "✅ Yuborildi: " + sent + " ta.\n❌ Xato: " + failed + " ta.");
+        sendAdminMenu(chatId);
+    }
+
+
 }
