@@ -29,6 +29,7 @@ public class Movie {
     @Enumerated(EnumType.STRING)
     private MovieType type;
 
+    @Column(columnDefinition = "TEXT")
     private String description;
 
     @Column(name = "file_id")

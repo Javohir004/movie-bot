@@ -112,7 +112,7 @@ public class Keyboards {
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup episodeGridMenu(List<Episode> episodes, String movieCode) {
+    public static InlineKeyboardMarkup episodeGridMenu(List<Episode> episodes, String movieCode, boolean singleSeason) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         List<InlineKeyboardButton> currentRow = new ArrayList<>();
 
@@ -128,7 +128,12 @@ public class Keyboards {
             rows.add(currentRow);
         }
 
-        rows.add(List.of(button("🔙 Fasllarga", "SERIES:" + movieCode)));
+        if (singleSeason) {
+            rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        } else {
+            rows.add(List.of(button("🔙 Fasllarga", "SERIES:" + movieCode)));
+        }
+
         return new InlineKeyboardMarkup(rows);
     }
 

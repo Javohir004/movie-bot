@@ -994,13 +994,22 @@ public class MovieBot extends TelegramLongPollingBot {
     }
 
     private void sendEpisodeList(long chatId, Long seasonId) {
-        Season season = seasonService.getById(seasonId);
+        Optional<Season> seasonOpt = seasonService.findById(seasonId);
+
+        if (seasonOpt.isEmpty()) {
+            sendText(chatId, "Bu fasl endi mavjud emas.");
+            return;
+        }
+
+        Season season = seasonOpt.get();
         List<Episode> episodes = episodeService.getEpisodesForSeason(seasonId);
 
         seasonService.incrementViewCount(season);
 
+        boolean singleSeason = seasonService.countSeasonsForMovie(season.getMovie().getId()) <= 1;
+
         String caption = buildSeasonCaption(season);
-        InlineKeyboardMarkup markup = Keyboards.episodeGridMenu(episodes, season.getMovie().getCode());
+        InlineKeyboardMarkup markup = Keyboards.episodeGridMenu(episodes, season.getMovie().getCode(), singleSeason);
 
         if (season.getPosterFileId() == null) {
             SendMessage message = new SendMessage(String.valueOf(chatId), caption);
@@ -1126,6 +1135,11 @@ public class MovieBot extends TelegramLongPollingBot {
         if (seasons.isEmpty()) {
             String caption = buildMovieCaption(movie) + "\n\n(Hali fasllar yuklanmagan)";
             sendMovieCaptionCard(chatId, movie, caption, Keyboards.backToUserMenu());
+            return;
+        }
+
+        if (seasons.size() == 1) {
+            sendEpisodeList(chatId, seasons.get(0).getId());
             return;
         }
 
