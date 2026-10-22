@@ -22,10 +22,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 @Component
 public class MovieBot extends TelegramLongPollingBot {
@@ -572,7 +569,7 @@ public class MovieBot extends TelegramLongPollingBot {
         List<Movie> byTitle = movieService.findByTitle(query);
 
         if (byTitle.isEmpty()) {
-            sendText(chatId, "Hech narsa topilmadi. Boshqa nom yoki kod bilan urinib ko'ring.");
+            sendNotFound(chatId);
         } else if (byTitle.size() == 1) {
             sendMovieByCode(chatId, byTitle.get(0).getCode());
         } else {
@@ -1118,8 +1115,15 @@ public class MovieBot extends TelegramLongPollingBot {
     }
 
     private void sendUserStart(long chatId) {
-        SendMessage message = new SendMessage(String.valueOf(chatId),
-                "Salom! Men kino va anime botiman.\n\nKino qidirish yoki barcha kino/seriallarni ko'rish uchun pastdagi tugmalardan foydalaning.");
+        String text = "👋 Xush kelibsiz!\n\n"
+                + "Men kino, serial va anime botiman. Mana nimalarni qila olaman:\n\n"
+                + "🔍 <b>Qidirish</b> — kino yoki anime nomini (yoki kodini) yozing, men topib beraman\n"
+                + "📽 <b>Barchasini ko'rish</b> — bazamizdagi barcha kino/serial/animelar ro'yxati\n"
+                + "🔥 <b>Top 5</b> — eng ko'p tomosha qilingan kino/seriallar\n\n"
+                + "Seriallar va animelar uchun fasl va qismlarni ham tanlab tomosha qilishingiz mumkin. Boshlash uchun pastdagi tugmalardan birini bosing 👇";
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), text);
+        message.setParseMode("HTML");
         message.setReplyMarkup(Keyboards.userMainMenu());
 
         try {
@@ -1257,6 +1261,34 @@ public class MovieBot extends TelegramLongPollingBot {
                 .stream()
                 .mapToInt(Season::getViewCount)
                 .sum();
+    }
+
+    private void sendNotFound(long chatId) {
+        String[] messages = {
+                "🔍 Qidirgan narsangiz topilmadi...\n\nBalki boshqa sayyoradandir? 👽\n\nPastdagi \"📽 Barchasini ko'rish\" tugmasidan mavjud kinolarni ko'rishingiz mumkin.",
+                "🕵️‍♂️ Bunday kino yo'q ekan... Sherlok Xolms ham topa olmaydi bu safar!\n\nNom yoki kodni tekshirib qayta yozing, yoki \"📽 Barchasini ko'rish\" orqali ro'yxatni ko'ring.",
+                "😅 Afsus, bazamizda bunday nom yoki kod yo'q.\n\nYozilishini tekshirib qayta urinib ko'ring, yoki pastdagi tugmalardan \"🔥 Top 5\" yoki \"📽 Barchasini ko'rish\"ni tanlang.",
+                "🙈 Hech narsa chiqmadi. Ehtimol siz uni xayolingizda ixtiro qilgandirsiz?\n\nMavjud kinolarni ko'rish uchun \"📽 Barchasini ko'rish\" tugmasini bosing.",
+                "📭 Bo'sh qoldik... Bunday nom yoki kod bazamizda yo'q.\n\nTo'g'ri yozilganiga ishonch hosil qiling, yoki pastdagi tugmalar orqali mavjud kinolarni ko'ring."
+        };
+
+        String randomMessage = messages[new Random().nextInt(messages.length)];
+
+        sendText(chatId, randomMessage);
+        sendUserStart(chatId);
+    }
+
+    private void sendChannelList(long chatId) {
+        List<RequiredChannel> channels = requiredChannelService.getActiveChannels();
+
+        SendMessage message = new SendMessage(String.valueOf(chatId), "Majburiy kanallar:");
+        message.setReplyMarkup(Keyboards.channelListMenu(channels));
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
     }
 
 
@@ -1460,19 +1492,6 @@ public class MovieBot extends TelegramLongPollingBot {
         }
 
         return false;
-    }
-
-    private void sendChannelList(long chatId) {
-        List<RequiredChannel> channels = requiredChannelService.getActiveChannels();
-
-        SendMessage message = new SendMessage(String.valueOf(chatId), "Majburiy kanallar:");
-        message.setReplyMarkup(Keyboards.channelListMenu(channels));
-
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            e.printStackTrace();
-        }
     }
 
     private void captureBroadcastContent(long chatId, long userId, Message message) {
