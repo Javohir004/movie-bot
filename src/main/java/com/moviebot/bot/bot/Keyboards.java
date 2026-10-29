@@ -38,13 +38,52 @@ public class Keyboards {
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup movieListMenu(List<Movie> movies) {
+    public static final int PAGE_SIZE = 10;
+
+    public static int totalPages(int itemCount) {
+        return Math.max(1, (itemCount + PAGE_SIZE - 1) / PAGE_SIZE);
+    }
+
+    public static int clampPage(int page, int itemCount) {
+        return Math.max(0, Math.min(page, totalPages(itemCount) - 1));
+    }
+
+    public static InlineKeyboardMarkup movieListMenu(List<Movie> movies, int page) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        for (Movie m : movies) {
-            rows.add(List.of(button(m.getCode() + " — " + m.getTitle(), "LISTITEM:" + m.getCode())));
-        }
+        addMoviePage(rows, movies, page, "LISTITEM:", "ADMINLIST:");
         rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
         return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup userMovieListPage(List<Movie> movies, int page) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        addMoviePage(rows, movies, page, "MOVIE:", "USERLIST:");
+        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    private static void addMoviePage(List<List<InlineKeyboardButton>> rows, List<Movie> movies, int page,
+                                     String itemPrefix, String pagePrefix) {
+        page = clampPage(page, movies.size());
+        int from = page * PAGE_SIZE;
+        int to = Math.min(from + PAGE_SIZE, movies.size());
+
+        for (Movie m : movies.subList(from, to)) {
+            rows.add(List.of(button(m.getCode() + " — " + m.getTitle(), itemPrefix + m.getCode())));
+        }
+
+        int total = totalPages(movies.size());
+        if (total > 1) {
+            List<InlineKeyboardButton> nav = new ArrayList<>();
+            if (page > 0) {
+                nav.add(button("◀️", pagePrefix + (page - 1)));
+            }
+            nav.add(button((page + 1) + "/" + total, "NOOP"));
+            if (page < total - 1) {
+                nav.add(button("▶️", pagePrefix + (page + 1)));
+            }
+            rows.add(nav);
+        }
     }
 
     public static InlineKeyboardMarkup movieDetailMenu(Movie movie) {

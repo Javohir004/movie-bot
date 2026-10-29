@@ -85,9 +85,15 @@ public class MovieService {
         movieRepository.save(movie);
     }
 
+    public boolean isCodeTaken(String code) {
+        return movieRepository.existsByCode(code.trim());
+    }
+
     public void deleteByCode(String code) {
         movieRepository.findByCodeAndActiveTrue(code).ifPresent(movie -> {
             movie.setActive(false);
+            // kod unique, shuning uchun o'chirilgan kinoning kodini bo'shatamiz
+            movie.setCode(movie.getCode() + "#deleted-" + movie.getId());
             movieRepository.save(movie);
         });
     }

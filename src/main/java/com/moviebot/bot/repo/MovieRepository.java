@@ -15,4 +15,6 @@ public interface MovieRepository extends JpaRepository<Movie, Long> {
     List<Movie> findByTitleContainingIgnoreCaseAndActiveTrue(String title);
 
     List<Movie> findAllByActiveTrue();
+
+    boolean existsByCode(String code);
 }
