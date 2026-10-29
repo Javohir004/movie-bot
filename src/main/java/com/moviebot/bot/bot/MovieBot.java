@@ -58,6 +58,7 @@ public class MovieBot extends TelegramLongPollingBot {
     private final EpisodeService episodeService;
     private final AdminInviteService adminInviteService;
     private final RequiredChannelService requiredChannelService;
+    private final StatsService statsService;
     private final Long rootAdminId;
     private final String groupLink;
 
@@ -71,8 +72,10 @@ public class MovieBot extends TelegramLongPollingBot {
                     SeasonService seasonService,
                     EpisodeService episodeService,
                     AdminInviteService adminInviteService,
-                    RequiredChannelService requiredChannelService) {
+                    RequiredChannelService requiredChannelService,
+                    StatsService statsService) {
         super(token);
+        this.statsService = statsService;
         this.username = username;
         this.rootAdminId = rootAdminId;
         this.movieService = movieService;
@@ -99,13 +102,19 @@ public class MovieBot extends TelegramLongPollingBot {
             log.error("Update'ni qayta ishlashda xato: updateId={}", update.getUpdateId(), e);
         }
 
+        Long userId = extractUserId(update);
+        if (userId == null) return;
+
         try {
-            Long userId = extractUserId(update);
-            if (userId != null) {
-                sessionManager.persist(userId);
-            }
+            sessionManager.persist(userId);
         } catch (Exception e) {
             log.error("Admin sessiyasini saqlashda xato: updateId={}", update.getUpdateId(), e);
+        }
+
+        try {
+            userService.touch(userId);
+        } catch (Exception e) {
+            log.error("Foydalanuvchi faolligini belgilashda xato: userId={}", userId, e);
         }
     }
 
@@ -417,6 +426,11 @@ public class MovieBot extends TelegramLongPollingBot {
 
         if (data.equals("ADMIN:LIST_MOVIES")) {
             sendMovieList(chatId);
+            return;
+        }
+
+        if (data.equals("ADMIN:STATS")) {
+            sendHtml(chatId, statsService.buildReport(), Keyboards.statsMenu());
             return;
         }
 
@@ -1167,6 +1181,18 @@ public class MovieBot extends TelegramLongPollingBot {
 
     private void sendText(long chatId, String text) {
         SendMessage message = new SendMessage(String.valueOf(chatId), text);
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            log.error("Telegram so'rovi bajarilmadi", e);
+        }
+    }
+
+    private void sendHtml(long chatId, String html, InlineKeyboardMarkup markup) {
+        SendMessage message = new SendMessage(String.valueOf(chatId), html);
+        message.setParseMode("HTML");
+        message.setReplyMarkup(markup);
+
         try {
             execute(message);
         } catch (TelegramApiException e) {

@@ -18,6 +18,14 @@ public class Keyboards {
         rows.add(List.of(button("👥 Adminlar ro'yxati", "ADMIN:LIST_ADMINS")));
         rows.add(List.of(button("📢 Majburiy kanallar", "ADMIN:CHANNELS")));
         rows.add(List.of(button("📣 Reklama yuborish", "ADMIN:BROADCAST")));
+        rows.add(List.of(button("📊 Statistika", "ADMIN:STATS")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup statsMenu() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("🔄 Yangilash", "ADMIN:STATS")));
+        rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
         return new InlineKeyboardMarkup(rows);
     }
 

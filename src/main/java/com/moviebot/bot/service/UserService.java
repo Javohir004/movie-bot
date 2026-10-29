@@ -6,17 +6,41 @@ import com.moviebot.bot.enums.Role;
 import com.moviebot.bot.repo.UserRepository;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Optional;
 
 @Service
 public class UserService {
 
+    // last_seen_at har tugma bosilganda emas, shu oraliqda bir marta yoziladi
+    private static final Duration TOUCH_INTERVAL = Duration.ofHours(1);
+
     private final UserRepository userRepository;
+    private final Map<Long, LocalDateTime> lastTouched = new ConcurrentHashMap<>();
 
     public UserService(UserRepository userRepository) {
         this.userRepository = userRepository;
+    }
+
+    // foydalanuvchi botdan foydalanganini belgilaydi (statistikadagi "faol" hisobi uchun)
+    public void touch(Long userId) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime previous = lastTouched.get(userId);
+        if (previous != null && previous.isAfter(now.minus(TOUCH_INTERVAL))) {
+            return;
+        }
+        lastTouched.put(userId, now);
+
+        userRepository.findByUserId(userId).ifPresent(user -> {
+            user.setLastSeenAt(now);
+            user.setActive(true);
+            userRepository.save(user);
+        });
     }
 
     public void registerIfAbsent(Long userId) {
