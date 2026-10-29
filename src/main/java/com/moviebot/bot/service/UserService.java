@@ -6,6 +6,7 @@ import com.moviebot.bot.enums.Role;
 import com.moviebot.bot.repo.UserRepository;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -52,8 +53,17 @@ public class UserService {
     public void registerOrUpdateName(Long userId, String firstName) {
         userRepository.findByUserId(userId).ifPresentOrElse(
                 user -> {
+                    boolean changed = false;
                     if (firstName != null && !firstName.equals(user.getFirstName())) {
                         user.setFirstName(firstName);
+                        changed = true;
+                    }
+                    // botni blokdan chiqarib qayta yozgan foydalanuvchi
+                    if (!user.isActive()) {
+                        user.setActive(true);
+                        changed = true;
+                    }
+                    if (changed) {
                         userRepository.save(user);
                     }
                 },
@@ -84,8 +94,20 @@ public class UserService {
     }
 
     public List<Long> getAllActiveUserIds() {
-        return userRepository.findAll().stream()
+        return userRepository.findByActiveTrue().stream()
                 .map(User::getUserId)
                 .toList();
+    }
+
+    // botni bloklagan yoki akkauntini o'chirgan foydalanuvchilar reklamada qayta-qayta "xato" bo'lmasin
+    public void deactivate(Collection<Long> userIds) {
+        List<Long> ids = List.copyOf(userIds);
+
+        // PostgreSQL IN (...) parametrlari soni cheklangan, shuning uchun bo'laklab ishlaymiz
+        for (int from = 0; from < ids.size(); from += 1000) {
+            List<User> users = userRepository.findByUserIdIn(ids.subList(from, Math.min(from + 1000, ids.size())));
+            users.forEach(user -> user.setActive(false));
+            userRepository.saveAll(users);
+        }
     }
 }

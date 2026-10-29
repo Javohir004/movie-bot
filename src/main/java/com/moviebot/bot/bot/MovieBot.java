@@ -1693,13 +1693,14 @@ public class MovieBot extends TelegramLongPollingBot {
         broadcastExecutor.submit(() -> {
             int sent = 0;
             int failed = 0;
+            List<Long> blocked = new ArrayList<>();
 
             try {
                 for (Long targetId : userIds) {
-                    if (copyWithRetry(targetId, sourceChatId, sourceMessageId)) {
-                        sent++;
-                    } else {
-                        failed++;
+                    switch (copyWithRetry(targetId, sourceChatId, sourceMessageId)) {
+                        case SENT -> sent++;
+                        case BLOCKED -> blocked.add(targetId);
+                        case FAILED -> failed++;
                     }
                     Thread.sleep(BROADCAST_DELAY_MS);
                 }
@@ -1707,12 +1708,21 @@ public class MovieBot extends TelegramLongPollingBot {
                 Thread.currentThread().interrupt();
             } finally {
                 broadcastRunning.set(false);
-                sendText(chatId, "✅ Yuborildi: " + sent + " ta.\n❌ Xato: " + failed + " ta.");
+                try {
+                    userService.deactivate(blocked);
+                } catch (RuntimeException e) {
+                    e.printStackTrace();
+                }
+                sendText(chatId, "✅ Yuborildi: " + sent + " ta.\n"
+                        + "🚫 Botni bloklagan: " + blocked.size() + " ta (endi ularga yuborilmaydi).\n"
+                        + "❌ Xato: " + failed + " ta.");
             }
         });
     }
 
-    private boolean copyWithRetry(Long targetId, Long sourceChatId, Integer sourceMessageId) throws InterruptedException {
+    private enum SendResult { SENT, BLOCKED, FAILED }
+
+    private SendResult copyWithRetry(Long targetId, Long sourceChatId, Integer sourceMessageId) throws InterruptedException {
         CopyMessage copyMessage = new CopyMessage();
         copyMessage.setChatId(String.valueOf(targetId));
         copyMessage.setFromChatId(String.valueOf(sourceChatId));
@@ -1720,22 +1730,26 @@ public class MovieBot extends TelegramLongPollingBot {
 
         try {
             execute(copyMessage);
-            return true;
+            return SendResult.SENT;
         } catch (TelegramApiRequestException e) {
+            // 403 Forbidden: bot bloklangan, akkaunt o'chirilgan yoki foydalanuvchi botni hech ochmagan
+            if (e.getErrorCode() != null && e.getErrorCode() == 403) {
+                return SendResult.BLOCKED;
+            }
             // 429 Too Many Requests: Telegram aytgan vaqtcha kutib, bir marta qayta urinamiz
             if (e.getErrorCode() != null && e.getErrorCode() == 429
                     && e.getParameters() != null && e.getParameters().getRetryAfter() != null) {
                 Thread.sleep(e.getParameters().getRetryAfter() * 1000L);
                 try {
                     execute(copyMessage);
-                    return true;
+                    return SendResult.SENT;
                 } catch (TelegramApiException retryError) {
-                    return false;
+                    return SendResult.FAILED;
                 }
             }
-            return false;
+            return SendResult.FAILED;
         } catch (TelegramApiException e) {
-            return false;
+            return SendResult.FAILED;
         }
     }
 
