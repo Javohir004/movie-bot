@@ -8,6 +8,7 @@ import com.moviebot.bot.service.*;
 import jakarta.annotation.PreDestroy;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
+import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
@@ -156,6 +157,9 @@ public class MovieBot extends TelegramLongPollingBot {
                 }
                 return;
             }
+
+            // eski xabardagi tugmalar orqali ham obunasiz kontent ko'rib bo'lmasin
+            if (isContentCallback(data) && !ensureSubscribed(chatId, userId)) return;
 
             if (data.startsWith("WATCHMOVIE:")) {
                 String code = data.substring("WATCHMOVIE:".length());
@@ -546,6 +550,19 @@ public class MovieBot extends TelegramLongPollingBot {
                         .replace("t.me/", "");
                 if (cleaned.startsWith("@")) {
                     cleaned = cleaned.substring(1);
+                }
+
+                if (!cleaned.matches("[A-Za-z0-9_]{4,32}")) {
+                    sendText(chatId, "Username noto'g'ri. Masalan: @mychannel. Qaytadan yuboring:");
+                    return;
+                }
+
+                // bot kanalda admin bo'lmasa, a'zolikni tekshira olmaydi va obuna talabi jimgina ishlamay qoladi
+                String problem = checkBotIsChannelAdmin(cleaned);
+                if (problem != null) {
+                    sendText(chatId, "❌ @" + cleaned + " qo'shilmadi: " + problem
+                            + "\n\nBotni kanalga admin qilib, qaytadan yuboring:");
+                    return;
                 }
 
                 requiredChannelService.addChannel(cleaned);
@@ -1546,6 +1563,33 @@ public class MovieBot extends TelegramLongPollingBot {
             return !"left".equals(status) && !"kicked".equals(status);
         } catch (TelegramApiException e) {
             return true;
+        }
+    }
+
+    private boolean isContentCallback(String data) {
+        return data.startsWith("WATCHMOVIE:")
+                || data.startsWith("MOVIE:")
+                || data.startsWith("SERIES:")
+                || data.startsWith("SEASON:")
+                || data.startsWith("EPISODE:");
+    }
+
+    // null qaytarsa hammasi joyida, aks holda muammo matni
+    private String checkBotIsChannelAdmin(String channelUsername) {
+        try {
+            Long botId = execute(new GetMe()).getId();
+
+            GetChatMember getChatMember = new GetChatMember();
+            getChatMember.setChatId("@" + channelUsername);
+            getChatMember.setUserId(botId);
+            String status = execute(getChatMember).getStatus();
+
+            if ("administrator".equals(status) || "creator".equals(status)) {
+                return null;
+            }
+            return "bot bu kanalda admin emas.";
+        } catch (TelegramApiException e) {
+            return "kanal topilmadi yoki bot unga qo'shilmagan.";
         }
     }
 
