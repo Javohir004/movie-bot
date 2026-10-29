@@ -98,6 +98,24 @@ public class MovieBot extends TelegramLongPollingBot {
             e.printStackTrace();
         }
 
+        try {
+            Long userId = extractUserId(update);
+            if (userId != null) {
+                sessionManager.persist(userId);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private Long extractUserId(Update update) {
+        if (update.hasCallbackQuery() && update.getCallbackQuery().getFrom() != null) {
+            return update.getCallbackQuery().getFrom().getId();
+        }
+        if (update.hasMessage() && update.getMessage().getFrom() != null) {
+            return update.getMessage().getFrom().getId();
+        }
+        return null;
     }
 
     private void processUpdate(Update update) {
