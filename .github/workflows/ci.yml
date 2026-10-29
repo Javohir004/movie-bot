@@ -1,10 +1,11 @@
-# Har bir push va pull request'da loyihani yig'ib, testlarni ishga tushiradi.
+# Pull request'larda va master'ga push qilinganda loyihani yig'ib, testlarni ishga tushiradi.
+# (Boshqa branch'larga push'da ishlamaydi: aks holda PR ochilganda bir xil kod ikki marta tekshiriladi.)
 # Testlar baza va bot tokenisiz ishlaydi, shuning uchun hech qanday secret kerak emas.
 name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [master]
   pull_request:
 
 jobs:
