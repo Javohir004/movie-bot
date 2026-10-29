@@ -27,10 +27,26 @@ public class Keyboards {
     public static InlineKeyboardMarkup genreAdminMenu(List<com.moviebot.bot.repo.GenreRepository.GenreWithCount> genres) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         for (var g : genres) {
-            rows.add(List.of(button("❌ " + g.getName() + " (" + g.getMovies() + ")", "RMGENRE:" + g.getId())));
+            int translated = (isSet(g.getNameUz()) ? 1 : 0) + (isSet(g.getNameRu()) ? 1 : 0) + (isSet(g.getNameEn()) ? 1 : 0);
+            String mark = translated == 3 ? "🌐" : "⚠️ " + translated + "/3";
+            rows.add(List.of(button(g.getName() + " (" + g.getMovies() + ") " + mark, "GENREEDIT:" + g.getId())));
         }
         rows.add(List.of(button("➕ Janr qo'shish", "ADMIN:ADD_GENRE")));
         rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    private static boolean isSet(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    public static InlineKeyboardMarkup genreEditMenu(Long genreId) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("✏️ 🇺🇿 O'zbekcha", "GENRETR:" + genreId + ":uz")));
+        rows.add(List.of(button("✏️ 🇷🇺 Русский", "GENRETR:" + genreId + ":ru")));
+        rows.add(List.of(button("✏️ 🇬🇧 English", "GENRETR:" + genreId + ":en")));
+        rows.add(List.of(button("🗑 Janrni o'chirish", "RMGENRE:" + genreId)));
+        rows.add(List.of(button("🔙 Janrlar", "ADMIN:GENRES")));
         return new InlineKeyboardMarkup(rows);
     }
 
@@ -68,12 +84,13 @@ public class Keyboards {
         return new InlineKeyboardMarkup(rows);
     }
 
+    // janr nomlari foydalanuvchi tilida (tarjima bo'lmasa asosiy nom)
     public static InlineKeyboardMarkup userGenreMenu(List<com.moviebot.bot.repo.GenreRepository.GenreWithCount> genres,
-                                                     Function<String, String> tr) {
+                                                     Function<String, String> tr, String language) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         List<InlineKeyboardButton> row = new ArrayList<>();
         for (var g : genres) {
-            row.add(button(g.getName() + " (" + g.getMovies() + ")", "GENRE:" + g.getId()));
+            row.add(button(g.nameFor(language) + " (" + g.getMovies() + ")", "GENRE:" + g.getId()));
             if (row.size() == 2) {
                 rows.add(row);
                 row = new ArrayList<>();

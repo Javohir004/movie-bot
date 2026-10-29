@@ -70,8 +70,33 @@ public class GenreService {
         return genreRepository.findGenreIdsByMovie(movieId);
     }
 
-    public List<String> namesForMovie(Long movieId) {
-        return genreRepository.findNamesByMovie(movieId);
+    // foydalanuvchi tilidagi nomlar, alifbo tartibida
+    public List<String> namesForMovie(Long movieId, String language) {
+        return genreRepository.findByMovie(movieId).stream()
+                .map(g -> g.nameFor(language))
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .toList();
+    }
+
+    // language: uz, ru yoki en; bo'sh qiymat yoki "-" tarjimani o'chiradi (asosiy nom chiqadi)
+    public Optional<Genre> setTranslation(Long genreId, String language, String value) {
+        return genreRepository.findById(genreId).map(genre -> {
+            String cleaned = value == null ? null : value.trim().replaceAll("\\s+", " ");
+            if (cleaned != null && (cleaned.isEmpty() || cleaned.equals("-"))) {
+                cleaned = null;
+            }
+            if (cleaned != null && cleaned.length() > MAX_NAME_LENGTH) {
+                throw new IllegalArgumentException("Janr nomi " + MAX_NAME_LENGTH + " belgidan uzun");
+            }
+
+            switch (language) {
+                case "uz" -> genre.setNameUz(cleaned);
+                case "ru" -> genre.setNameRu(cleaned);
+                case "en" -> genre.setNameEn(cleaned);
+                default -> throw new IllegalArgumentException("Noma'lum til: " + language);
+            }
+            return genreRepository.save(genre);
+        });
     }
 
     // belgilangan bo'lsa olib tashlaydi, bo'lmasa qo'shadi; qaytadi: endi belgilanganmi

@@ -36,6 +36,10 @@ public class PendingMovie {
     private String broadcastButtonText;
     private String broadcastButtonUrl;
 
+    // janr tarjimasini tahrirlash
+    private Long genreTranslationId;
+    private String genreTranslationLanguage;
+
     // homiy kanal qo'shish jarayoni
     private String channelUsername;
     private String channelChatId;

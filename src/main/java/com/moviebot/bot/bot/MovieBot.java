@@ -581,6 +581,34 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
+        if (data.startsWith("GENREEDIT:")) {
+            sessionManager.clear(userId);
+            sendGenreEdit(chatId, Long.parseLong(data.substring("GENREEDIT:".length())));
+            return;
+        }
+
+        // GENRETR:<janrId>:<til> — shu tildagi nomni yozish so'raladi
+        if (data.startsWith("GENRETR:")) {
+            String[] parts = data.split(":");
+            Long genreId = Long.parseLong(parts[1]);
+            String language = I18n.normalize(parts[2]);
+
+            sessionManager.clear(userId);
+            PendingMovie pending = sessionManager.getPendingMovie(userId);
+            pending.setGenreTranslationId(genreId);
+            pending.setGenreTranslationLanguage(language);
+            sessionManager.setState(userId, AdminState.AWAITING_GENRE_TRANSLATION);
+
+            String languageName = switch (language) {
+                case "ru" -> "ruscha";
+                case "en" -> "inglizcha";
+                default -> "o'zbekcha";
+            };
+            sendTextWithMarkup(chatId, "Janrning " + languageName + " nomini yozing.\n"
+                    + "Tarjimani o'chirish uchun - yuboring (unda asosiy nom ko'rsatiladi).", Keyboards.backOnly());
+            return;
+        }
+
         if (data.startsWith("RMGENRE:")) {
             Long genreId = Long.parseLong(data.substring("RMGENRE:".length()));
             genreService.findById(genreId).ifPresentOrElse(
@@ -760,6 +788,31 @@ public class MovieBot extends TelegramLongPollingBot {
             }
             case AWAITING_EPISODE_VIDEO -> sendText(chatId, "Iltimos, video yuboring.");
             case AWAITING_CHANNEL_USERNAME -> handleChannelInput(chatId, userId, text.trim());
+            case AWAITING_GENRE_TRANSLATION -> {
+                Long genreId = pending.getGenreTranslationId();
+                String language = pending.getGenreTranslationLanguage();
+                if (genreId == null || language == null) {
+                    sessionManager.clear(userId);
+                    sendGenreAdminList(chatId);
+                    return;
+                }
+
+                try {
+                    if (genreService.setTranslation(genreId, language, text).isEmpty()) {
+                        sessionManager.clear(userId);
+                        sendText(chatId, "Janr topilmadi.");
+                        sendGenreAdminList(chatId);
+                        return;
+                    }
+                } catch (IllegalArgumentException e) {
+                    sendText(chatId, "Nom " + GenreService.MAX_NAME_LENGTH + " belgidan oshmasligi kerak. Qaytadan yozing:");
+                    return;
+                }
+
+                sessionManager.clear(userId);
+                sendText(chatId, "✅ Saqlandi.");
+                sendGenreEdit(chatId, genreId);
+            }
             case AWAITING_GENRE_NAME -> {
                 GenreService.AddResult result = genreService.addAll(text);
                 sessionManager.clear(userId);
@@ -1215,21 +1268,46 @@ public class MovieBot extends TelegramLongPollingBot {
         sendOrEditList(chatId, editMessageId, "🎭 \"" + movie.getTitle() + "\" janrlari (bosib belgilang):", markup);
     }
 
+    private void sendGenreEdit(long chatId, Long genreId) {
+        Optional<Genre> genreOpt = genreService.findById(genreId);
+        if (genreOpt.isEmpty()) {
+            sendGenreAdminList(chatId);
+            return;
+        }
+
+        Genre genre = genreOpt.get();
+        String text = "🎭 <b>" + escape(genre.getName()) + "</b>\n\n"
+                + "🇺🇿 O'zbekcha: " + translationOrDash(genre.getNameUz()) + "\n"
+                + "🇷🇺 Русский: " + translationOrDash(genre.getNameRu()) + "\n"
+                + "🇬🇧 English: " + translationOrDash(genre.getNameEn()) + "\n\n"
+                + "<i>Tarjima yozilmagan tilda asosiy nom (" + escape(genre.getName()) + ") ko'rsatiladi.</i>";
+        sendHtml(chatId, text, Keyboards.genreEditMenu(genreId));
+    }
+
+    private String translationOrDash(String value) {
+        return value == null || value.isBlank() ? "—" : escape(value);
+    }
+
     private void sendGenreAdminList(long chatId) {
         var genres = genreService.findAllWithMovieCount();
         String text = genres.isEmpty()
                 ? "🎭 Janrlar hali qo'shilmagan.\n\nQo'shilgan janrlar foydalanuvchi menyusida chiqadi, kinolarga esa kartochkasidagi 🎭 tugma orqali belgilanadi."
-                : "🎭 Janrlar (qavs ichida kinolar soni).\nO'chirish uchun janrni bosing:";
+                : "🎭 Janrlar (qavs ichida kinolar soni).\n🌐 — uchala tilga tarjima qilingan, ⚠️ — tarjimasi chala.\n"
+                + "Tarjima qilish yoki o'chirish uchun janrni bosing:";
         sendTextWithMarkup(chatId, text, Keyboards.genreAdminMenu(genres));
     }
 
     private void sendUserGenres(long chatId) {
-        var genres = genreService.findNonEmpty();
+        String language = lang(chatId);
+        // foydalanuvchi tilidagi nom bo'yicha alifbo tartibida
+        var genres = genreService.findNonEmpty().stream()
+                .sorted(Comparator.comparing(g -> g.nameFor(language), String.CASE_INSENSITIVE_ORDER))
+                .toList();
         if (genres.isEmpty()) {
             sendTextWithMarkup(chatId, t(chatId, "genres.empty"), Keyboards.backToUserMenu(tr(chatId)));
             return;
         }
-        sendTextWithMarkup(chatId, t(chatId, "genres.choose"), Keyboards.userGenreMenu(genres, tr(chatId)));
+        sendTextWithMarkup(chatId, t(chatId, "genres.choose"), Keyboards.userGenreMenu(genres, tr(chatId), language));
     }
 
     private void sendGenreMovies(long chatId, Long genreId, int page, Integer editMessageId) {
@@ -1240,7 +1318,7 @@ public class MovieBot extends TelegramLongPollingBot {
             sendUserGenres(chatId);
             return;
         }
-        sendOrEditList(chatId, editMessageId, "🎭 " + genre.get().getName() + ":",
+        sendOrEditList(chatId, editMessageId, "🎭 " + genre.get().nameFor(lang(chatId)) + ":",
                 Keyboards.userGenreMoviePage(movies, genreId, page, tr(chatId)));
     }
 
@@ -1815,7 +1893,7 @@ public class MovieBot extends TelegramLongPollingBot {
 
 
     private String buildMovieCaption(Movie movie, long chatId) {
-        String header = "🎬 <b>" + escape(movie.getTitle()) + "</b>\n" + genresLine(movie) + "\n";
+        String header = "🎬 <b>" + escape(movie.getTitle()) + "</b>\n" + genresLine(movie, chatId) + "\n";
         String footer = "\n\n" + t(chatId, "caption.views", formatCount(effectiveViewCount(movie))) + "\n"
                 + t(chatId, "caption.code", escape(movie.getCode()))
                 + groupLine(chatId);
@@ -1825,7 +1903,7 @@ public class MovieBot extends TelegramLongPollingBot {
     private String buildSeasonCaption(Season season, long chatId) {
         Movie movie = season.getMovie();
         String header = "🎬 <b>" + escape(movie.getTitle()) + "</b>\n"
-                + t(chatId, "caption.season", season.getSeasonNumber()) + "\n" + genresLine(movie) + "\n";
+                + t(chatId, "caption.season", season.getSeasonNumber()) + "\n" + genresLine(movie, chatId) + "\n";
         String footer = "\n\n" + t(chatId, "caption.views", formatCount(season.getViewCount())) + "\n"
                 + t(chatId, "caption.code", escape(movie.getCode()))
                 + groupLine(chatId);
@@ -1833,8 +1911,8 @@ public class MovieBot extends TelegramLongPollingBot {
     }
 
     // janr belgilanmagan bo'lsa bo'sh
-    private String genresLine(Movie movie) {
-        List<String> names = genreService.namesForMovie(movie.getId());
+    private String genresLine(Movie movie, long chatId) {
+        List<String> names = genreService.namesForMovie(movie.getId(), lang(chatId));
         return names.isEmpty() ? "" : "🎭 " + escape(String.join(", ", names)) + "\n";
     }
 
