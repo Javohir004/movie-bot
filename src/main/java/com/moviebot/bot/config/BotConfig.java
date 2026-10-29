@@ -5,6 +5,7 @@ import com.moviebot.bot.domain.User;
 import com.moviebot.bot.enums.Role;
 import com.moviebot.bot.repo.UserRepository;
 import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
@@ -12,6 +13,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
 
+@Slf4j
 @Component
 public class BotConfig {
 
@@ -38,7 +40,7 @@ public class BotConfig {
             TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
             botsApi.registerBot(movieBot);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Botni Telegram'da ro'yxatdan o'tkazib bo'lmadi (token to'g'rimi?)", e);
         }
     }
 

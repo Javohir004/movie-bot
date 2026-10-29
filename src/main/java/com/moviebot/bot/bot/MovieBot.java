@@ -6,8 +6,10 @@ import com.moviebot.bot.enums.InviteStatus;
 import com.moviebot.bot.enums.MovieType;
 import com.moviebot.bot.service.*;
 import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
+import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
@@ -31,6 +33,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+@Slf4j
 @Component
 public class MovieBot extends TelegramLongPollingBot {
 
@@ -93,10 +96,27 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             processUpdate(update);
         } catch (Exception e) {
-            System.out.println(e.getMessage());
-            e.printStackTrace();
+            log.error("Update'ni qayta ishlashda xato: updateId={}", update.getUpdateId(), e);
         }
 
+        try {
+            Long userId = extractUserId(update);
+            if (userId != null) {
+                sessionManager.persist(userId);
+            }
+        } catch (Exception e) {
+            log.error("Admin sessiyasini saqlashda xato: updateId={}", update.getUpdateId(), e);
+        }
+    }
+
+    private Long extractUserId(Update update) {
+        if (update.hasCallbackQuery() && update.getCallbackQuery().getFrom() != null) {
+            return update.getCallbackQuery().getFrom().getId();
+        }
+        if (update.hasMessage() && update.getMessage().getFrom() != null) {
+            return update.getMessage().getFrom().getId();
+        }
+        return null;
     }
 
     private void processUpdate(Update update) {
@@ -123,7 +143,7 @@ public class MovieBot extends TelegramLongPollingBot {
                 try {
                     execute(message);
                 } catch (TelegramApiException e) {
-                    e.printStackTrace();
+                    log.error("Telegram so'rovi bajarilmadi", e);
                 }
                 return;
             }
@@ -156,6 +176,9 @@ public class MovieBot extends TelegramLongPollingBot {
                 }
                 return;
             }
+
+            // eski xabardagi tugmalar orqali ham obunasiz kontent ko'rib bo'lmasin
+            if (isContentCallback(data) && !ensureSubscribed(chatId, userId)) return;
 
             if (data.startsWith("WATCHMOVIE:")) {
                 String code = data.substring("WATCHMOVIE:".length());
@@ -548,6 +571,19 @@ public class MovieBot extends TelegramLongPollingBot {
                     cleaned = cleaned.substring(1);
                 }
 
+                if (!cleaned.matches("[A-Za-z0-9_]{4,32}")) {
+                    sendText(chatId, "Username noto'g'ri. Masalan: @mychannel. Qaytadan yuboring:");
+                    return;
+                }
+
+                // bot kanalda admin bo'lmasa, a'zolikni tekshira olmaydi va obuna talabi jimgina ishlamay qoladi
+                String problem = checkBotIsChannelAdmin(cleaned);
+                if (problem != null) {
+                    sendText(chatId, "❌ @" + cleaned + " qo'shilmadi: " + problem
+                            + "\n\nBotni kanalga admin qilib, qaytadan yuboring:");
+                    return;
+                }
+
                 requiredChannelService.addChannel(cleaned);
                 sessionManager.clear(userId);
                 sendText(chatId, "✅ @" + cleaned + " qo'shildi.");
@@ -844,7 +880,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -893,13 +929,25 @@ public class MovieBot extends TelegramLongPollingBot {
 
     private void cancelSeriesCreation(long chatId, long userId) {
         PendingMovie pending = sessionManager.getPendingMovie(userId);
+        String message = "Bekor qilindi.";
+
+        // hali birorta qism yuklanmagan fasl ochilib qolgan bo'lsa, uni olib tashlaymiz
+        if (pending.getCurrentSeasonId() != null
+                && episodeService.getEpisodesForSeason(pending.getCurrentSeasonId()).isEmpty()) {
+            seasonService.findById(pending.getCurrentSeasonId()).ifPresent(seasonService::delete);
+        }
 
         if (pending.getMovieId() != null && !pending.isSeasonAdditionOnly()) {
-            movieService.deleteByCode(pending.getCode());
+            // yuklangan fasllar bo'lsa, admin mehnati yo'qolmasin: serialni o'chirmaymiz
+            if (seasonService.countSeasonsForMovie(pending.getMovieId()) == 0) {
+                movieService.deleteByCode(pending.getCode());
+            } else {
+                message = "Bekor qilindi. Shu paytgacha yuklangan fasl va qismlar saqlab qolindi.";
+            }
         }
 
         sessionManager.clear(userId);
-        sendText(chatId, "Bekor qilindi.");
+        sendText(chatId, message);
         sendAdminMenu(chatId);
     }
 
@@ -953,7 +1001,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -964,7 +1012,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -977,7 +1025,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -990,7 +1038,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1015,7 +1063,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1067,7 +1115,7 @@ public class MovieBot extends TelegramLongPollingBot {
             try {
                 execute(message);
             } catch (TelegramApiException e) {
-                e.printStackTrace();
+                log.error("Telegram so'rovi bajarilmadi", e);
             }
             return;
         }
@@ -1082,7 +1130,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(photo);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1105,7 +1153,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(video);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1113,7 +1161,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(new AnswerCallbackQuery(callbackQueryId));
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1122,7 +1170,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1133,7 +1181,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1178,7 +1226,7 @@ public class MovieBot extends TelegramLongPollingBot {
                 execute(message);
             }
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1197,7 +1245,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1228,7 +1276,7 @@ public class MovieBot extends TelegramLongPollingBot {
             try {
                 execute(message);
             } catch (TelegramApiException e) {
-                e.printStackTrace();
+                log.error("Telegram so'rovi bajarilmadi", e);
             }
             return;
         }
@@ -1243,7 +1291,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(photo);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1264,7 +1312,7 @@ public class MovieBot extends TelegramLongPollingBot {
             try {
                 execute(message);
             } catch (TelegramApiException e) {
-                e.printStackTrace();
+                log.error("Telegram so'rovi bajarilmadi", e);
             }
             return;
         }
@@ -1280,7 +1328,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(video);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1293,7 +1341,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1316,7 +1364,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1355,7 +1403,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1372,7 +1420,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1387,7 +1435,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1400,7 +1448,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1415,7 +1463,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1430,7 +1478,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1462,7 +1510,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1477,7 +1525,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1501,39 +1549,18 @@ public class MovieBot extends TelegramLongPollingBot {
         return header + "📖 " + fitDescription(movie.getDescription(), header + footer) + footer;
     }
 
-    // Tavsifni caption limitiga sig'adigan qilib qisqartiradi.
-    // Teglar va &amp; ham hisobga kiradi, shuning uchun hisob har doim zaxira bilan chiqadi.
+    // Caption limitiga sig'adigan qilib tavsifni qisqartiradi
     private String fitDescription(String description, String rest) {
-        if (description == null) return "";
-
         int available = MAX_CAPTION_LENGTH - CAPTION_RESERVE - rest.length() - "📖 ".length();
-        if (available <= 0) return "";
-
-        String text = description;
-        if (escape(text).length() > available) {
-            text = text.substring(0, Math.max(0, Math.min(text.length(), available) - 1));
-            while (!text.isEmpty() && escape(text).length() > available - 1) {
-                text = text.substring(0, text.length() - 1);
-            }
-            // emoji (surrogate pair) o'rtasidan kesilib qolmasin
-            if (!text.isEmpty() && Character.isHighSurrogate(text.charAt(text.length() - 1))) {
-                text = text.substring(0, text.length() - 1);
-            }
-            text = text + "…";
-        }
-        return escape(text);
+        return TextFormat.fitDescription(description, available);
     }
 
     private String escape(String text) {
-        if (text == null) return "";
-        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return TextFormat.escape(text);
     }
 
     private String formatCount(int count) {
-        if (count >= 1000) {
-            return String.format("%.1fk", count / 1000.0);
-        }
-        return String.valueOf(count);
+        return TextFormat.formatCount(count);
     }
 
     private boolean isMemberOf(String channelUsername, long userId) {
@@ -1545,7 +1572,36 @@ public class MovieBot extends TelegramLongPollingBot {
             String status = member.getStatus();
             return !"left".equals(status) && !"kicked".equals(status);
         } catch (TelegramApiException e) {
+            // tekshira olmasak foydalanuvchini to'smaymiz, lekin admin bilishi uchun logga yozamiz
+            log.warn("@{} kanalida a'zolikni tekshirib bo'lmadi (bot admin emasmi?): {}", channelUsername, e.getMessage());
             return true;
+        }
+    }
+
+    private boolean isContentCallback(String data) {
+        return data.startsWith("WATCHMOVIE:")
+                || data.startsWith("MOVIE:")
+                || data.startsWith("SERIES:")
+                || data.startsWith("SEASON:")
+                || data.startsWith("EPISODE:");
+    }
+
+    // null qaytarsa hammasi joyida, aks holda muammo matni
+    private String checkBotIsChannelAdmin(String channelUsername) {
+        try {
+            Long botId = execute(new GetMe()).getId();
+
+            GetChatMember getChatMember = new GetChatMember();
+            getChatMember.setChatId("@" + channelUsername);
+            getChatMember.setUserId(botId);
+            String status = execute(getChatMember).getStatus();
+
+            if ("administrator".equals(status) || "creator".equals(status)) {
+                return null;
+            }
+            return "bot bu kanalda admin emas.";
+        } catch (TelegramApiException e) {
+            return "kanal topilmadi yoki bot unga qo'shilmagan.";
         }
     }
 
@@ -1580,7 +1636,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
 
         return false;
@@ -1606,7 +1662,7 @@ public class MovieBot extends TelegramLongPollingBot {
         try {
             execute(confirm);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            log.error("Telegram so'rovi bajarilmadi", e);
         }
     }
 
@@ -1637,13 +1693,14 @@ public class MovieBot extends TelegramLongPollingBot {
         broadcastExecutor.submit(() -> {
             int sent = 0;
             int failed = 0;
+            List<Long> blocked = new ArrayList<>();
 
             try {
                 for (Long targetId : userIds) {
-                    if (copyWithRetry(targetId, sourceChatId, sourceMessageId)) {
-                        sent++;
-                    } else {
-                        failed++;
+                    switch (copyWithRetry(targetId, sourceChatId, sourceMessageId)) {
+                        case SENT -> sent++;
+                        case BLOCKED -> blocked.add(targetId);
+                        case FAILED -> failed++;
                     }
                     Thread.sleep(BROADCAST_DELAY_MS);
                 }
@@ -1651,12 +1708,21 @@ public class MovieBot extends TelegramLongPollingBot {
                 Thread.currentThread().interrupt();
             } finally {
                 broadcastRunning.set(false);
-                sendText(chatId, "✅ Yuborildi: " + sent + " ta.\n❌ Xato: " + failed + " ta.");
+                try {
+                    userService.deactivate(blocked);
+                } catch (RuntimeException e) {
+                    log.error("Bloklagan foydalanuvchilarni belgilashda xato", e);
+                }
+                sendText(chatId, "✅ Yuborildi: " + sent + " ta.\n"
+                        + "🚫 Botni bloklagan: " + blocked.size() + " ta (endi ularga yuborilmaydi).\n"
+                        + "❌ Xato: " + failed + " ta.");
             }
         });
     }
 
-    private boolean copyWithRetry(Long targetId, Long sourceChatId, Integer sourceMessageId) throws InterruptedException {
+    private enum SendResult { SENT, BLOCKED, FAILED }
+
+    private SendResult copyWithRetry(Long targetId, Long sourceChatId, Integer sourceMessageId) throws InterruptedException {
         CopyMessage copyMessage = new CopyMessage();
         copyMessage.setChatId(String.valueOf(targetId));
         copyMessage.setFromChatId(String.valueOf(sourceChatId));
@@ -1664,22 +1730,26 @@ public class MovieBot extends TelegramLongPollingBot {
 
         try {
             execute(copyMessage);
-            return true;
+            return SendResult.SENT;
         } catch (TelegramApiRequestException e) {
+            // 403 Forbidden: bot bloklangan, akkaunt o'chirilgan yoki foydalanuvchi botni hech ochmagan
+            if (e.getErrorCode() != null && e.getErrorCode() == 403) {
+                return SendResult.BLOCKED;
+            }
             // 429 Too Many Requests: Telegram aytgan vaqtcha kutib, bir marta qayta urinamiz
             if (e.getErrorCode() != null && e.getErrorCode() == 429
                     && e.getParameters() != null && e.getParameters().getRetryAfter() != null) {
                 Thread.sleep(e.getParameters().getRetryAfter() * 1000L);
                 try {
                     execute(copyMessage);
-                    return true;
+                    return SendResult.SENT;
                 } catch (TelegramApiException retryError) {
-                    return false;
+                    return SendResult.FAILED;
                 }
             }
-            return false;
+            return SendResult.FAILED;
         } catch (TelegramApiException e) {
-            return false;
+            return SendResult.FAILED;
         }
     }
 
