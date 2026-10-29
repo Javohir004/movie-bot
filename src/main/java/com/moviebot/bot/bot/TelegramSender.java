@@ -5,7 +5,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.DefaultAbsSender;
 import org.telegram.telegrambots.bots.DefaultBotOptions;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.BotApiMethod;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
@@ -59,6 +61,23 @@ public class TelegramSender extends DefaultAbsSender {
         SendMessage message = new SendMessage(String.valueOf(chatId), text);
         message.setReplyMarkup(markup);
         send(message);
+    }
+
+    public void answerCallback(String callbackQueryId) {
+        send(new AnswerCallbackQuery(callbackQueryId));
+    }
+
+    // Sahifa almashtirilganda yangi xabar yubormasdan, mavjud xabarning tugmalarini almashtiradi
+    public void sendOrEdit(long chatId, Integer editMessageId, String text, InlineKeyboardMarkup markup) {
+        if (editMessageId != null) {
+            EditMessageReplyMarkup edit = new EditMessageReplyMarkup();
+            edit.setChatId(String.valueOf(chatId));
+            edit.setMessageId(editMessageId);
+            edit.setReplyMarkup(markup);
+            send(edit);
+        } else {
+            sendText(chatId, text, markup);
+        }
     }
 
     public void sendHtml(long chatId, String html, InlineKeyboardMarkup markup) {

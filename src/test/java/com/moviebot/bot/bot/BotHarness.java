@@ -1,5 +1,6 @@
 package com.moviebot.bot.bot;
 
+import com.moviebot.bot.bot.handler.*;
 import com.moviebot.bot.domain.User;
 import com.moviebot.bot.enums.Role;
 import com.moviebot.bot.repo.AdminSessionRepository;
@@ -81,10 +82,23 @@ class BotHarness {
         doAnswer(inv -> record(inv.getArgument(0))).when(sender).execute(any(SendPhoto.class));
         doAnswer(inv -> record(inv.getArgument(0))).when(sender).execute(any(SendVideo.class));
 
-        bot = new MovieBot("123:TEST", "test_bot", ADMIN_ID, "",
-                movieService, userService, sessionManager, seasonService, episodeService,
-                adminInviteService, channelService, statsService, broadcastService, genreService,
-                new I18n(messages), sender);
+        // Spring'dagi kabi yig'iladi (handler'lar va ularning bog'liqliklari)
+        I18n i18n = new I18n(messages);
+        BotTexts texts = new BotTexts(userService, i18n);
+        SubscriptionGate gate = new SubscriptionGate(sender, channelService, userService, texts);
+        UserHandler userHandler = new UserHandler(sender, texts, gate, userService, movieService, seasonService,
+                episodeService, genreService, "test_bot", "");
+        AdminPanelHandler panel = new AdminPanelHandler(sender, userService, adminInviteService, statsService,
+                sessionManager, "test_bot", ADMIN_ID);
+        AdminMovieHandler movieHandler = new AdminMovieHandler(sender, sessionManager, movieService, seasonService,
+                episodeService, genreService, panel);
+        AdminChannelHandler channelHandler = new AdminChannelHandler(sender, sessionManager, channelService);
+        AdminBroadcastHandler broadcastHandler = new AdminBroadcastHandler(sender, sessionManager, broadcastService,
+                userService, panel);
+        AdminGenreHandler genreHandler = new AdminGenreHandler(sender, sessionManager, genreService, movieService);
+
+        bot = new MovieBot("123:TEST", "test_bot", sender, userService, sessionManager, gate, userHandler, panel,
+                movieHandler, channelHandler, broadcastHandler, genreHandler);
     }
 
     private Object record(Object method) {

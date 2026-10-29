@@ -2,6 +2,9 @@ package com.moviebot.bot.bot;
 
 public final class TextFormat {
 
+    public static final java.time.format.DateTimeFormatter DATE_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+
     private TextFormat() {
     }
 
