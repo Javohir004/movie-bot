@@ -1549,39 +1549,18 @@ public class MovieBot extends TelegramLongPollingBot {
         return header + "📖 " + fitDescription(movie.getDescription(), header + footer) + footer;
     }
 
-    // Tavsifni caption limitiga sig'adigan qilib qisqartiradi.
-    // Teglar va &amp; ham hisobga kiradi, shuning uchun hisob har doim zaxira bilan chiqadi.
+    // Caption limitiga sig'adigan qilib tavsifni qisqartiradi
     private String fitDescription(String description, String rest) {
-        if (description == null) return "";
-
         int available = MAX_CAPTION_LENGTH - CAPTION_RESERVE - rest.length() - "📖 ".length();
-        if (available <= 0) return "";
-
-        String text = description;
-        if (escape(text).length() > available) {
-            text = text.substring(0, Math.max(0, Math.min(text.length(), available) - 1));
-            while (!text.isEmpty() && escape(text).length() > available - 1) {
-                text = text.substring(0, text.length() - 1);
-            }
-            // emoji (surrogate pair) o'rtasidan kesilib qolmasin
-            if (!text.isEmpty() && Character.isHighSurrogate(text.charAt(text.length() - 1))) {
-                text = text.substring(0, text.length() - 1);
-            }
-            text = text + "…";
-        }
-        return escape(text);
+        return TextFormat.fitDescription(description, available);
     }
 
     private String escape(String text) {
-        if (text == null) return "";
-        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return TextFormat.escape(text);
     }
 
     private String formatCount(int count) {
-        if (count >= 1000) {
-            return String.format("%.1fk", count / 1000.0);
-        }
-        return String.valueOf(count);
+        return TextFormat.formatCount(count);
     }
 
     private boolean isMemberOf(String channelUsername, long userId) {
