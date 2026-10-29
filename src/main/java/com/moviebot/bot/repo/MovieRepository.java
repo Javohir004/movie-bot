@@ -4,6 +4,7 @@ import com.moviebot.bot.domain.Movie;
 import com.moviebot.bot.enums.MovieType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -19,6 +20,29 @@ public interface MovieRepository extends JpaRepository<Movie, Long> {
     List<Movie> findAllByActiveTrue();
 
     boolean existsByCode(String code);
+
+    boolean existsByCodeIgnoreCase(String code);
+
+    Optional<Movie> findFirstByCodeIgnoreCaseAndActiveTrueOrderByIdAsc(String code);
+
+    // Nomni kichik harflarga o'tkazib, turli apostroflarni bitta (') ga keltirib qidiradi.
+    // q ham xuddi shunday normallashtirilgan bo'lishi kerak (MovieService.normalize).
+    @Query(value = "select * from movies m where m.is_active = true "
+            + "and strpos(translate(lower(m.title), :apostrophes, :plain), :q) > 0 "
+            + "order by m.title limit :limit", nativeQuery = true)
+    List<Movie> searchByNormalizedTitle(@Param("q") String q, @Param("apostrophes") String apostrophes,
+                                        @Param("plain") String plain, @Param("limit") int limit);
+
+    // Xato yozilgan nomlar uchun o'xshashlari (pg_trgm kerak)
+    @Query(value = "select m.* from movies m where m.is_active = true "
+            + "and greatest(similarity(translate(lower(m.title), :apostrophes, :plain), :q), "
+            + "             word_similarity(:q, translate(lower(m.title), :apostrophes, :plain))) >= :threshold "
+            + "order by greatest(similarity(translate(lower(m.title), :apostrophes, :plain), :q), "
+            + "                  word_similarity(:q, translate(lower(m.title), :apostrophes, :plain))) desc "
+            + "limit :limit", nativeQuery = true)
+    List<Movie> findSimilarTitles(@Param("q") String q, @Param("apostrophes") String apostrophes,
+                                  @Param("plain") String plain, @Param("threshold") double threshold,
+                                  @Param("limit") int limit);
 
     long countByTypeAndActiveTrue(MovieType type);
 

@@ -603,7 +603,9 @@ public class MovieBot extends TelegramLongPollingBot {
                     return;
                 }
 
-                if (!keepsOwnCode && movieService.isCodeTaken(code)) {
+                // tahrirlashda o'z kodining faqat harf kattaligini o'zgartirish mumkin (A1 -> a1)
+                boolean ownCodeAnyCase = pending.isEditing() && code.equalsIgnoreCase(pending.getEditingCode());
+                if (!ownCodeAnyCase && movieService.isCodeTaken(code)) {
                     sendText(chatId, "Bu kod allaqachon band. Boshqa kod kiriting:");
                     return;
                 }
@@ -737,22 +739,19 @@ public class MovieBot extends TelegramLongPollingBot {
     }
 
     private void handleSearch(long chatId, String query) {
+        MovieService.SearchResult result = movieService.search(query);
+        List<Movie> matches = result.matches();
 
-        Optional<Movie> byCode = movieService.findByCode(query);
-
-        if (byCode.isPresent()) {
-            sendMovieByCode(chatId, byCode.get().getCode());
-            return;
-        }
-
-        List<Movie> byTitle = movieService.findByTitle(query);
-
-        if (byTitle.isEmpty()) {
-            sendNotFound(chatId);
-        } else if (byTitle.size() == 1) {
-            sendMovieByCode(chatId, byTitle.get(0).getCode());
+        if (matches.size() == 1) {
+            sendMovieByCode(chatId, matches.get(0).getCode());
+        } else if (!matches.isEmpty()) {
+            sendChoices(chatId, matches, matches.size() >= MovieService.MAX_RESULTS
+                    ? "Ko'p natija chiqdi, birinchi " + MovieService.MAX_RESULTS + " tasi. Aniqroq yozing yoki tanlang:"
+                    : "Bir nechtasi topildi, birini tanlang:");
+        } else if (!result.suggestions().isEmpty()) {
+            sendChoices(chatId, result.suggestions(), "🤔 Aynan shunday nom topilmadi. Balki shulardan birini qidirgandirsiz:");
         } else {
-            sendChoices(chatId, byTitle);
+            sendNotFound(chatId);
         }
     }
 
@@ -1134,7 +1133,7 @@ public class MovieBot extends TelegramLongPollingBot {
         }
     }
 
-    private void sendChoices(long chatId, List<Movie> movies) {
+    private void sendChoices(long chatId, List<Movie> movies, String header) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
         for (Movie m : movies) {
@@ -1149,7 +1148,7 @@ public class MovieBot extends TelegramLongPollingBot {
 
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup(rows);
 
-        SendMessage message = new SendMessage(String.valueOf(chatId), "Bir nechtasi topildi, birini tanlang:");
+        SendMessage message = new SendMessage(String.valueOf(chatId), header);
         message.setReplyMarkup(markup);
 
         try {
