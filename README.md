@@ -1,5 +1,7 @@
 # 🎬 Movie Bot
 
+[![CI](https://github.com/Javohir004/movie-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Javohir004/movie-bot/actions/workflows/ci.yml)
+
 A Telegram bot built with **Spring Boot** that lets users search for movies, TV series, and anime by title or code, then instantly receive the video. Admins can manage the entire catalog — including posters, seasons, and episodes — directly from Telegram, with no external panel needed.
 
 ## ✨ Features
@@ -40,23 +42,35 @@ A Telegram bot built with **Spring Boot** that lets users search for movies, TV 
 
 ## 🏗 Architecture
 
-The project follows a simple layered architecture:
+The project follows a layered architecture:
 
 ```
 Telegram Update
       │
       ▼
-   MovieBot            → handles Telegram updates, routes commands & callbacks
+   MovieBot            → receives updates and routes them (no business logic)
+      │
+      ├─ UserHandler           → language, menu, search, lists, genres, watching
+      │    └─ SubscriptionGate → required-channel checks, join counting
+      ├─ AdminPanelHandler     → admin menu, admins & invites, stats
+      ├─ AdminMovieHandler     → add/edit movies & series, seasons, episodes
+      ├─ AdminChannelHandler   → sponsor channels
+      ├─ AdminBroadcastHandler → preparing ads (BroadcastDispatcher sends them)
+      └─ AdminGenreHandler     → genres and their translations
       │
       ▼
-   Services            → MovieService, SeasonService, EpisodeService, UserService, AdminInviteService
+   Services            → MovieService, UserService, BroadcastService, GenreService, ...
       │
       ▼
-   Repositories         → Spring Data JPA interfaces
+   Repositories        → Spring Data JPA interfaces
       │
       ▼
-   PostgreSQL
+   PostgreSQL (schema managed by Flyway)
 ```
+
+All outgoing Telegram calls go through `TelegramSender`, so handlers, the broadcast dispatcher and scheduled jobs never depend on `MovieBot` itself.
+
+Callbacks are checked in a fixed order: user buttons (behind the subscription check) → admin invite confirmation → admin buttons. Admin callback prefixes don't overlap, so each admin handler only looks at its own.
 
 Admin conversations (adding/editing a movie, adding seasons & episodes) are managed through a lightweight **session state machine** (`AdminSessionManager`), so multiple admins can work independently at the same time. Sessions are persisted to the `admin_sessions` table, so an unfinished flow survives a restart.
 
@@ -67,35 +81,29 @@ The database schema is managed by **Flyway** (`src/main/resources/db/migration`)
 ```
 src/main/java/com/moviebot/bot/
 ├── MovieBotApplication.java
-├── BotConfig.java
+├── config/BotConfig.java          → registers the bot, ensures the root admin
 ├── bot/
-│   ├── MovieBot.java
-│   └── AdminSessionManager.java
-├── domain/
-│   ├── Movie.java
-│   ├── Season.java
-│   ├── Episode.java
-│   ├── User.java
-│   ├── AdminInvite.java
-│   ├── PendingMovie.java
-│   └── Keyboards.java
+│   ├── MovieBot.java              → update router
+│   ├── TelegramSender.java        → all outgoing Telegram calls
+│   ├── Keyboards.java             → inline keyboards
+│   ├── I18n.java, TextFormat.java → translations, HTML escaping, caption limits
+│   ├── AdminSessionManager.java   → admin flow state (persisted)
+│   ├── BroadcastDispatcher.java   → sends scheduled ads in the background
+│   ├── BroadcastInput.java        → parses ad buttons and send times
+│   ├── ChannelExpiryJob.java      → removes expired sponsor channels
+│   └── handler/                   → UserHandler, SubscriptionGate, Admin*Handler, BotTexts
+├── domain/                        → JPA entities (+ PendingMovie, the admin flow draft)
 ├── enums/
-│   ├── MovieType.java
-│   ├── Role.java
-│   ├── AdminState.java
-│   └── InviteStatus.java
-├── repo/
-│   ├── MovieRepository.java
-│   ├── SeasonRepository.java
-│   ├── EpisodeRepository.java
-│   ├── UserRepository.java
-│   └── AdminInviteRepository.java
-└── service/
-    ├── MovieService.java
-    ├── SeasonService.java
-    ├── EpisodeService.java
-    ├── UserService.java
-    └── AdminInviteService.java
+├── repo/                          → Spring Data repositories
+└── service/                       → business logic
+
+src/main/resources/
+├── db/migration/                  → Flyway migrations (V1…)
+└── messages*.properties           → user-facing texts (uz / ru / en)
+
+src/test/java/…
+├── bot/MovieBotBehaviorTest.java  → end-to-end bot behavior with fake Telegram updates (BotHarness)
+└── …                              → unit tests for services, keyboards, parsing, i18n
 ```
 
 ## 🗄 Database Schema (simplified)

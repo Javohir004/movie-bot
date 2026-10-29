@@ -1,0 +1,29 @@
+# Pull request'larda va master'ga push qilinganda loyihani yig'ib, testlarni ishga tushiradi.
+# (Boshqa branch'larga push'da ishlamaydi: aks holda PR ochilganda bir xil kod ikki marta tekshiriladi.)
+# Testlar baza va bot tokenisiz ishlaydi, shuning uchun hech qanday secret kerak emas.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Testlar
+        run: ./mvnw -B test
+
+      - name: Docker image yig'iladimi
+        run: docker build -t movie-bot:ci .
