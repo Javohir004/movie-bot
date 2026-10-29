@@ -49,6 +49,10 @@ public class SeasonService {
         seasonRepository.save(season);
     }
 
+    public void delete(Season season) {
+        seasonRepository.delete(season);
+    }
+
     public void updatePoster(Season season, String posterFileId) {
         season.setPosterFileId(posterFileId);
         seasonRepository.save(season);

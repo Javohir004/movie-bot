@@ -910,13 +910,25 @@ public class MovieBot extends TelegramLongPollingBot {
 
     private void cancelSeriesCreation(long chatId, long userId) {
         PendingMovie pending = sessionManager.getPendingMovie(userId);
+        String message = "Bekor qilindi.";
+
+        // hali birorta qism yuklanmagan fasl ochilib qolgan bo'lsa, uni olib tashlaymiz
+        if (pending.getCurrentSeasonId() != null
+                && episodeService.getEpisodesForSeason(pending.getCurrentSeasonId()).isEmpty()) {
+            seasonService.findById(pending.getCurrentSeasonId()).ifPresent(seasonService::delete);
+        }
 
         if (pending.getMovieId() != null && !pending.isSeasonAdditionOnly()) {
-            movieService.deleteByCode(pending.getCode());
+            // yuklangan fasllar bo'lsa, admin mehnati yo'qolmasin: serialni o'chirmaymiz
+            if (seasonService.countSeasonsForMovie(pending.getMovieId()) == 0) {
+                movieService.deleteByCode(pending.getCode());
+            } else {
+                message = "Bekor qilindi. Shu paytgacha yuklangan fasl va qismlar saqlab qolindi.";
+            }
         }
 
         sessionManager.clear(userId);
-        sendText(chatId, "Bekor qilindi.");
+        sendText(chatId, message);
         sendAdminMenu(chatId);
     }
 
