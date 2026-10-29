@@ -62,10 +62,35 @@ class BroadcastInputTest {
     }
 
     @Test
+    void usernameAloneBecomesButton() {
+        assertThat(BroadcastInput.parseButton("@void_movie_bot"))
+                .contains(new BroadcastInput.LinkButton("➡️ @void_movie_bot", "https://t.me/void_movie_bot"));
+    }
+
+    @Test
+    void linkAloneGetsDefaultText() {
+        assertThat(BroadcastInput.parseButton("t.me/void_movie_bot"))
+                .contains(new BroadcastInput.LinkButton("➡️ O'tish", "https://t.me/void_movie_bot"));
+        assertThat(BroadcastInput.parseButton("https://example.uz/kino"))
+                .contains(new BroadcastInput.LinkButton("➡️ O'tish", "https://example.uz/kino"));
+    }
+
+    @Test
+    void textBeforeLinkWithoutSeparator() {
+        assertThat(BroadcastInput.parseButton("  🤖 Botga   o'tish  @void_movie_bot "))
+                .contains(new BroadcastInput.LinkButton("🤖 Botga   o'tish", "https://t.me/void_movie_bot"));
+        assertThat(BroadcastInput.parseButton("Saytga o'tish https://example.uz"))
+                .contains(new BroadcastInput.LinkButton("Saytga o'tish", "https://example.uz"));
+    }
+
+    @Test
     void invalidButtonsAreRejected() {
         assertThat(BroadcastInput.parseButton("faqat matn")).isEmpty();
         assertThat(BroadcastInput.parseButton(" | https://t.me/x")).isEmpty();
         assertThat(BroadcastInput.parseButton("Matn | kanal.uz")).isEmpty();
         assertThat(BroadcastInput.parseButton("x".repeat(65) + " | https://t.me/x")).isEmpty();
+        assertThat(BroadcastInput.parseButton("@ab")).isEmpty();
+        assertThat(BroadcastInput.parseButton("   ")).isEmpty();
+        assertThat(BroadcastInput.parseButton("Kanal @")).isEmpty();
     }
 }

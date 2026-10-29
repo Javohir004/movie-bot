@@ -24,26 +24,52 @@ public final class BroadcastInput {
     public record LinkButton(String text, String url) {
     }
 
-    // "Matn | https://link" ko'rinishida
+    // Qabul qilinadigan ko'rinishlar:
+    //   "@kanal"                    -> tugma "➡️ @kanal"
+    //   "t.me/kanal" / "https://.." -> tugma "➡️ O'tish"
+    //   "Matn @kanal" / "Matn https://.." -> oxirgi so'z havola, qolgani tugma matni
+    //   "Matn | havola"             -> | dan oldingisi matn (matn bo'sh bo'lsa rad etiladi)
     public static Optional<LinkButton> parseButton(String input) {
         if (input == null) return Optional.empty();
+        String value = input.trim();
+        if (value.isEmpty()) return Optional.empty();
 
-        int separator = input.lastIndexOf('|');
-        if (separator < 0) return Optional.empty();
+        String text;
+        String link;
+        int separator = value.lastIndexOf('|');
 
-        String text = input.substring(0, separator).trim();
-        String url = input.substring(separator + 1).trim();
+        if (separator >= 0) {
+            text = value.substring(0, separator).trim();
+            link = value.substring(separator + 1).trim();
+            if (text.isEmpty()) return Optional.empty();
+        } else {
+            String[] words = value.split("\\s+");
+            link = words[words.length - 1];
+            text = value.substring(0, value.length() - link.length()).trim();
+        }
 
+        String url = toUrl(link);
+        if (url == null) return Optional.empty();
+
+        if (text.isEmpty()) {
+            text = link.startsWith("@") ? "➡️ " + link : "➡️ O'tish";
+        }
+        if (text.length() > 64) return Optional.empty();
+
+        return Optional.of(new LinkButton(text, url));
+    }
+
+    // @username, t.me/... yoki to'liq havolani https:// ko'rinishiga keltiradi; noto'g'ri bo'lsa null
+    private static String toUrl(String link) {
+        String url = link;
         if (url.startsWith("@")) {
-            url = "https://t.me/" + url.substring(1);
+            String username = url.substring(1);
+            if (!username.matches("[A-Za-z0-9_]{4,32}")) return null;
+            url = "https://t.me/" + username;
         } else if (url.startsWith("t.me/")) {
             url = "https://" + url;
         }
-
-        if (text.isEmpty() || text.length() > 64 || !URL.matcher(url).matches() || url.length() > 512) {
-            return Optional.empty();
-        }
-        return Optional.of(new LinkButton(text, url));
+        return URL.matcher(url).matches() && url.length() <= 512 ? url : null;
     }
 
     // "20:00" (bugun, o'tib ketgan bo'lsa ertaga), "30.10 20:00" yoki "30.10.2026 20:00".

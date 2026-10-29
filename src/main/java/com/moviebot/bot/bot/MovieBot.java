@@ -46,6 +46,9 @@ public class MovieBot extends TelegramLongPollingBot {
     // keyin qo'shiladigan "Faslni tanlang:" kabi matnlar uchun zaxira
     private static final int CAPTION_RESERVE = 60;
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+    private static final String BROADCAST_BUTTON_EXAMPLES = "• @mykanal\n"
+            + "• Kanalga o'tish @mykanal\n"
+            + "• Saytga o'tish https://example.uz";
     // messages*.properties dagi notfound.N kalitlari soni
     private static final int NOT_FOUND_VARIANTS = 5;
 
@@ -843,8 +846,9 @@ public class MovieBot extends TelegramLongPollingBot {
                 pending.setBroadcastButtonText(button.text());
                 pending.setBroadcastButtonUrl(button.url());
                 showBroadcastPreview(chatId, userId);
-            }, () -> sendText(chatId, "Tugmani shunday yozing:\nKanalga o'tish | https://t.me/mykanal\n\n"
-                    + "Havola https:// yoki t.me/ bilan boshlanishi, matn 64 belgidan oshmasligi kerak.\n"
+            }, () -> sendText(chatId, "Havolani tushunmadim. Shunday yozing:\n\n"
+                    + BROADCAST_BUTTON_EXAMPLES + "\n\n"
+                    + "Havola @username, t.me/... yoki https://... bo'lishi, matn 64 belgidan oshmasligi kerak.\n"
                     + "Tugma kerak bo'lmasa, \"Tugmasiz davom etish\"ni bosing."));
             case AWAITING_BROADCAST_TIME -> BroadcastInput.parseTime(text, LocalDateTime.now()).ifPresentOrElse(
                     sendAt -> scheduleBroadcast(chatId, userId, sendAt),
@@ -2191,7 +2195,7 @@ public class MovieBot extends TelegramLongPollingBot {
         sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_BUTTON);
 
         sendTextWithMarkup(chatId, "Reklama ostiga havola tugmasi qo'shasizmi?\n\n"
-                        + "Qo'shish uchun shunday yozing:\nKanalga o'tish | https://t.me/mykanal",
+                        + "Qo'shish uchun havolani yuboring, masalan:\n\n" + BROADCAST_BUTTON_EXAMPLES,
                 Keyboards.broadcastButtonMenu());
     }
 
