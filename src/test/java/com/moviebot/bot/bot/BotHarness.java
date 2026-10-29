@@ -75,14 +75,16 @@ class BotHarness {
         when(channelService.getActiveChannels()).thenReturn(List.of());
         when(genreService.namesForMovie(any(), any())).thenReturn(List.of());
 
-        MovieBot real = new MovieBot("123:TEST", "test_bot", ADMIN_ID, "",
-                movieService, userService, sessionManager, seasonService, episodeService,
-                adminInviteService, channelService, statsService, broadcastService, genreService, new I18n(messages));
-        bot = spy(real);
+        // hamma yuborish TelegramSender orqali: uning execute'lari ushlanadi, haqiqiy Telegram'ga hech narsa ketmaydi
+        TelegramSender sender = spy(new TelegramSender("123:TEST"));
+        doAnswer(inv -> record(inv.getArgument(0))).when(sender).execute(ArgumentMatchers.<BotApiMethod<Serializable>>any());
+        doAnswer(inv -> record(inv.getArgument(0))).when(sender).execute(any(SendPhoto.class));
+        doAnswer(inv -> record(inv.getArgument(0))).when(sender).execute(any(SendVideo.class));
 
-        doAnswer(inv -> record(inv.getArgument(0))).when(bot).execute(ArgumentMatchers.<BotApiMethod<Serializable>>any());
-        doAnswer(inv -> record(inv.getArgument(0))).when(bot).execute(any(SendPhoto.class));
-        doAnswer(inv -> record(inv.getArgument(0))).when(bot).execute(any(SendVideo.class));
+        bot = new MovieBot("123:TEST", "test_bot", ADMIN_ID, "",
+                movieService, userService, sessionManager, seasonService, episodeService,
+                adminInviteService, channelService, statsService, broadcastService, genreService,
+                new I18n(messages), sender);
     }
 
     private Object record(Object method) {

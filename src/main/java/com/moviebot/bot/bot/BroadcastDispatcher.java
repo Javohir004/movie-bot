@@ -32,15 +32,15 @@ public class BroadcastDispatcher {
     // shuncha xabardan keyin natija bazaga yoziladi (bot o'chib qolsa ham qancha ketgani ma'lum bo'lsin)
     private static final int PROGRESS_EVERY = 200;
 
-    private final MovieBot bot;
+    private final TelegramSender sender;
     private final BroadcastService broadcastService;
     private final UserService userService;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean running = new AtomicBoolean(false);
 
-    public BroadcastDispatcher(MovieBot bot, BroadcastService broadcastService, UserService userService) {
-        this.bot = bot;
+    public BroadcastDispatcher(TelegramSender sender, BroadcastService broadcastService, UserService userService) {
+        this.sender = sender;
         this.broadcastService = broadcastService;
         this.userService = userService;
     }
@@ -50,7 +50,7 @@ public class BroadcastDispatcher {
     public void markInterruptedBroadcasts() {
         for (Broadcast b : broadcastService.findSending()) {
             if (broadcastService.markInterrupted(b.getId())) {
-                bot.sendNotice(b.getCreatedBy(), "⚠️ Reklama #" + b.getId() + " yuborilayotganda bot qayta ishga tushdi va u to'xtab qoldi.\n"
+                sender.sendText(b.getCreatedBy(), "⚠️ Reklama #" + b.getId() + " yuborilayotganda bot qayta ishga tushdi va u to'xtab qoldi.\n"
                         + "✅ Yuborilgan: ~" + b.getSent() + " / " + b.getTotal() + "\n"
                         + "Qolganlarga takror ketmasligi uchun avtomatik davom ettirilmadi.");
             }
@@ -71,7 +71,7 @@ public class BroadcastDispatcher {
             // shu orada bekor qilingan bo'lsa yuborilmaydi
             if (!broadcastService.markSending(broadcast.getId(), targets.size())) return;
 
-            bot.sendNotice(broadcast.getCreatedBy(), "⏳ Reklama #" + broadcast.getId() + " yuborilmoqda: "
+            sender.sendText(broadcast.getCreatedBy(), "⏳ Reklama #" + broadcast.getId() + " yuborilmoqda: "
                     + targets.size() + " ta foydalanuvchi. Tugagach hisobot yuboraman.");
             executor.submit(() -> send(broadcast, targets));
             started = true;
@@ -126,7 +126,7 @@ public class BroadcastDispatcher {
         }
 
         long minutes = Duration.between(started, LocalDateTime.now()).toMinutes();
-        bot.sendNotice(broadcast.getCreatedBy(), "📣 Reklama #" + broadcast.getId() + " yakunlandi\n\n"
+        sender.sendText(broadcast.getCreatedBy(), "📣 Reklama #" + broadcast.getId() + " yakunlandi\n\n"
                 + "✅ Yuborildi: " + sent + "\n"
                 + "🚫 Botni bloklagan: " + blocked.size() + " (endi ularga yuborilmaydi)\n"
                 + "❌ Xato: " + failed + "\n"
@@ -145,7 +145,7 @@ public class BroadcastDispatcher {
         }
 
         try {
-            bot.execute(copyMessage);
+            sender.execute(copyMessage);
             return SendResult.SENT;
         } catch (TelegramApiRequestException e) {
             // 403 Forbidden: bot bloklangan, akkaunt o'chirilgan yoki foydalanuvchi botni hech ochmagan
@@ -157,7 +157,7 @@ public class BroadcastDispatcher {
                     && e.getParameters() != null && e.getParameters().getRetryAfter() != null) {
                 Thread.sleep(e.getParameters().getRetryAfter() * 1000L);
                 try {
-                    bot.execute(copyMessage);
+                    sender.execute(copyMessage);
                     return SendResult.SENT;
                 } catch (TelegramApiException retryError) {
                     return SendResult.FAILED;

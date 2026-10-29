@@ -64,6 +64,7 @@ public class MovieBot extends TelegramLongPollingBot {
     private final BroadcastService broadcastService;
     private final GenreService genreService;
     private final I18n i18n;
+    private final TelegramSender sender;
     private final Long rootAdminId;
     private final String groupLink;
 
@@ -81,9 +82,11 @@ public class MovieBot extends TelegramLongPollingBot {
                     StatsService statsService,
                     BroadcastService broadcastService,
                     GenreService genreService,
-                    I18n i18n) {
+                    I18n i18n,
+                    TelegramSender sender) {
         super(token);
         this.i18n = i18n;
+        this.sender = sender;
         this.statsService = statsService;
         this.broadcastService = broadcastService;
         this.genreService = genreService;
@@ -183,11 +186,7 @@ public class MovieBot extends TelegramLongPollingBot {
 
                 SendMessage message = new SendMessage(String.valueOf(chatId), t(chatId, "search.prompt"));
                 message.setReplyMarkup(Keyboards.backToUserMenu(tr(chatId)));
-                try {
-                    execute(message);
-                } catch (TelegramApiException e) {
-                    log.error("Telegram so'rovi bajarilmadi", e);
-                }
+                sender.send(message);
                 return;
             }
 
@@ -1143,11 +1142,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Faslni tanlang:");
         message.setReplyMarkup(Keyboards.seasonManageListMenu(seasons, movie.getCode()));
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void startEditSeasonPosterFlow(long chatId, long userId, Long seasonId) {
@@ -1343,22 +1338,14 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), info);
         message.setReplyMarkup(Keyboards.movieDetailMenu(movie));   // ← MANA SHU QATOR
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void confirmDelete(long chatId, String code) {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Rostdan ham o'chirmoqchimisiz?");
         message.setReplyMarkup(Keyboards.deleteConfirmMenu(code));
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
 
@@ -1367,11 +1354,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Admin panel:");
         message.setReplyMarkup(Keyboards.adminMenu());
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void sendAdminList(long chatId) {
@@ -1380,11 +1363,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Adminlar ro'yxati:");
         message.setReplyMarkup(Keyboards.adminListMenu(admins, rootAdminId));
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void sendChoices(long chatId, List<Movie> movies, String header) {
@@ -1405,11 +1384,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), header);
         message.setReplyMarkup(markup);
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void sendMovieByCode(long chatId, String code) {
@@ -1457,11 +1432,7 @@ public class MovieBot extends TelegramLongPollingBot {
             message.setParseMode("HTML");
             message.setReplyMarkup(markup);
 
-            try {
-                execute(message);
-            } catch (TelegramApiException e) {
-                log.error("Telegram so'rovi bajarilmadi", e);
-            }
+            sender.send(message);
             return;
         }
 
@@ -1472,11 +1443,7 @@ public class MovieBot extends TelegramLongPollingBot {
         photo.setParseMode("HTML");
         photo.setReplyMarkup(markup);
 
-        try {
-            execute(photo);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(photo);
     }
 
     private void sendEpisodeVideo(long chatId, Long episodeId) {
@@ -1496,16 +1463,12 @@ public class MovieBot extends TelegramLongPollingBot {
                 + "\n\n🤖 @" + username);
         video.setReplyMarkup(Keyboards.episodeVideoMenu(season.getId(), nextEpisodeId, tr(chatId)));
 
-        try {
-            execute(video);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(video);
     }
 
     private void answerCallback(String callbackQueryId) {
         try {
-            execute(new AnswerCallbackQuery(callbackQueryId));
+            sender.execute(new AnswerCallbackQuery(callbackQueryId));
         } catch (TelegramApiException e) {
             log.error("Telegram so'rovi bajarilmadi", e);
         }
@@ -1513,11 +1476,7 @@ public class MovieBot extends TelegramLongPollingBot {
 
     private void sendText(long chatId, String text) {
         SendMessage message = new SendMessage(String.valueOf(chatId), text);
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void sendHtml(long chatId, String html, InlineKeyboardMarkup markup) {
@@ -1525,22 +1484,14 @@ public class MovieBot extends TelegramLongPollingBot {
         message.setParseMode("HTML");
         message.setReplyMarkup(markup);
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void sendTextWithMarkup(long chatId, String text, InlineKeyboardMarkup markup) {
         SendMessage message = new SendMessage(String.valueOf(chatId), text);
         message.setReplyMarkup(markup);
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void sendMovieList(long chatId) {
@@ -1581,11 +1532,11 @@ public class MovieBot extends TelegramLongPollingBot {
                 edit.setChatId(String.valueOf(chatId));
                 edit.setMessageId(editMessageId);
                 edit.setReplyMarkup(markup);
-                execute(edit);
+                sender.execute(edit);
             } else {
                 SendMessage message = new SendMessage(String.valueOf(chatId), text);
                 message.setReplyMarkup(markup);
-                execute(message);
+                sender.execute(message);
             }
         } catch (TelegramApiException e) {
             log.error("Telegram so'rovi bajarilmadi", e);
@@ -1597,11 +1548,7 @@ public class MovieBot extends TelegramLongPollingBot {
         message.setParseMode("HTML");
         message.setReplyMarkup(Keyboards.userMainMenu(tr(chatId)));
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void sendSeasonList(long chatId, Movie movie) {
@@ -1628,11 +1575,7 @@ public class MovieBot extends TelegramLongPollingBot {
             message.setParseMode("HTML");
             message.setReplyMarkup(markup);
 
-            try {
-                execute(message);
-            } catch (TelegramApiException e) {
-                log.error("Telegram so'rovi bajarilmadi", e);
-            }
+            sender.send(message);
             return;
         }
 
@@ -1643,11 +1586,7 @@ public class MovieBot extends TelegramLongPollingBot {
         photo.setParseMode("HTML");
         photo.setReplyMarkup(markup);
 
-        try {
-            execute(photo);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(photo);
     }
 
     private void sendActualMovieVideo(long chatId, String code) {
@@ -1664,11 +1603,7 @@ public class MovieBot extends TelegramLongPollingBot {
             SendMessage message = new SendMessage(String.valueOf(chatId), t(chatId, "video.notUploaded"));
             message.setReplyMarkup(Keyboards.backToUserMenu(tr(chatId)));
 
-            try {
-                execute(message);
-            } catch (TelegramApiException e) {
-                log.error("Telegram so'rovi bajarilmadi", e);
-            }
+            sender.send(message);
             return;
         }
 
@@ -1680,11 +1615,7 @@ public class MovieBot extends TelegramLongPollingBot {
         video.setCaption(movie.getTitle() + "\n\n🤖 @" + username);
         video.setReplyMarkup(Keyboards.backToUserMenu(tr(chatId)));
 
-        try {
-            execute(video);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(video);
     }
 
     private void sendSeasonManageMenu(long chatId, Long seasonId) {
@@ -1693,11 +1624,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), season.getSeasonNumber() + "-fasl:");
         message.setReplyMarkup(Keyboards.seasonManageMenu(seasonId, season.getMovie().getCode()));
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void sendTopViewed(long chatId) {
@@ -1716,11 +1643,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), t(chatId, "list.top"));
         message.setReplyMarkup(Keyboards.userMovieListMenu(top, tr(chatId)));
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private int effectiveViewCount(Movie movie) {
@@ -1782,11 +1705,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Kino/serial nomini yozing:" + current);
         message.setReplyMarkup(Keyboards.backOnly());
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void askCode(long chatId, long userId) {
@@ -1797,11 +1716,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Kod kiriting (masalan A103):" + current);
         message.setReplyMarkup(Keyboards.backOnly());
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void askType(long chatId, long userId) {
@@ -1810,11 +1725,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Turi qanday?");
         message.setReplyMarkup(Keyboards.movieTypeMenu());
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void askDescription(long chatId, long userId) {
@@ -1825,11 +1736,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Tavsifini yozing:" + current);
         message.setReplyMarkup(Keyboards.backOnly());
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void askVideo(long chatId, long userId) {
@@ -1840,11 +1747,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Endi videoni yuboring:" + note);
         message.setReplyMarkup(Keyboards.backOnly());
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void askSeasonCount(long chatId, long userId) {
@@ -1872,11 +1775,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), "Endi poster (rasm) yuboring:" + note);
         message.setReplyMarkup(Keyboards.backOnly());
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
     private void askSeasonPoster(long chatId, long userId) {
@@ -1887,11 +1786,7 @@ public class MovieBot extends TelegramLongPollingBot {
                 pending.getCurrentSeasonNumber() + "-fasl uchun poster (rasm) yuboring:");
         message.setReplyMarkup(Keyboards.backOnly());
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
     }
 
 
@@ -1962,7 +1857,7 @@ public class MovieBot extends TelegramLongPollingBot {
             GetChatMember getChatMember = new GetChatMember();
             getChatMember.setChatId(channel.chatIdentifier());
             getChatMember.setUserId(userId);
-            ChatMember member = execute(getChatMember);
+            ChatMember member = sender.execute(getChatMember);
             String status = member.getStatus();
             return !"left".equals(status) && !"kicked".equals(status);
         } catch (TelegramApiException e) {
@@ -1983,12 +1878,12 @@ public class MovieBot extends TelegramLongPollingBot {
     // chatIdentifier: "@username" yoki "-100..."; null qaytarsa hammasi joyida, aks holda muammo matni
     private String checkBotIsChannelAdmin(String chatIdentifier) {
         try {
-            Long botId = execute(new GetMe()).getId();
+            Long botId = sender.execute(new GetMe()).getId();
 
             GetChatMember getChatMember = new GetChatMember();
             getChatMember.setChatId(chatIdentifier);
             getChatMember.setUserId(botId);
-            String status = execute(getChatMember).getStatus();
+            String status = sender.execute(getChatMember).getStatus();
 
             if ("administrator".equals(status) || "creator".equals(status)) {
                 return null;
@@ -2001,7 +1896,7 @@ public class MovieBot extends TelegramLongPollingBot {
 
     private String fetchChatTitle(String chatIdentifier) {
         try {
-            return execute(GetChat.builder().chatId(chatIdentifier).build()).getTitle();
+            return sender.execute(GetChat.builder().chatId(chatIdentifier).build()).getTitle();
         } catch (TelegramApiException e) {
             log.warn("{} kanal nomini olib bo'lmadi: {}", chatIdentifier, e.getMessage());
             return null;
@@ -2011,7 +1906,7 @@ public class MovieBot extends TelegramLongPollingBot {
     // yopiq kanal uchun zayavkali havola; bot "Foydalanuvchilarni taklif qilish" huquqiga ega bo'lishi kerak
     private String createJoinRequestLink(String chatId) {
         try {
-            return execute(CreateChatInviteLink.builder()
+            return sender.execute(CreateChatInviteLink.builder()
                     .chatId(chatId)
                     .name("Bot orqali")
                     .createsJoinRequest(true)
@@ -2172,11 +2067,7 @@ public class MovieBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage(String.valueOf(chatId), t(chatId, "sub.prompt"));
         message.setReplyMarkup(Keyboards.subscriptionPromptMenu(unjoined, tr(chatId)));
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sender.send(message);
 
         return false;
     }
@@ -2217,7 +2108,7 @@ public class MovieBot extends TelegramLongPollingBot {
             if (pending.getBroadcastButtonUrl() != null) {
                 preview.setReplyMarkup(Keyboards.linkButton(pending.getBroadcastButtonText(), pending.getBroadcastButtonUrl()));
             }
-            execute(preview);
+            sender.execute(preview);
         } catch (TelegramApiException e) {
             log.error("Reklama ko'rinishini yuborib bo'lmadi", e);
         }
