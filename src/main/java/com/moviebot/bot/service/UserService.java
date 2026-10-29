@@ -22,6 +22,8 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final Map<Long, LocalDateTime> lastTouched = new ConcurrentHashMap<>();
+    // har xabarda bazadan o'qimaslik uchun; Optional.empty() = hali tanlamagan
+    private final Map<Long, Optional<String>> languages = new ConcurrentHashMap<>();
 
     public UserService(UserRepository userRepository) {
         this.userRepository = userRepository;
@@ -41,6 +43,20 @@ public class UserService {
             user.setActive(true);
             userRepository.save(user);
         });
+    }
+
+    // tanlangan til yoki bo'sh (hali tanlamagan / foydalanuvchi bazada yo'q)
+    public Optional<String> findLanguage(Long userId) {
+        return languages.computeIfAbsent(userId, id ->
+                userRepository.findByUserId(id).map(User::getLanguage).filter(l -> !l.isBlank()));
+    }
+
+    public void setLanguage(Long userId, String language) {
+        userRepository.findByUserId(userId).ifPresent(user -> {
+            user.setLanguage(language);
+            userRepository.save(user);
+        });
+        languages.put(userId, Optional.of(language));
     }
 
     public void registerIfAbsent(Long userId) {

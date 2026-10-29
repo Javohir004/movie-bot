@@ -39,6 +39,10 @@ public class User {
     @Column(name = "last_seen_at")
     private LocalDateTime lastSeenAt;
 
+    // uz, ru, en; bo'sh bo'lsa hali tanlamagan
+    @Column(name = "language", length = 8)
+    private String language;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) {

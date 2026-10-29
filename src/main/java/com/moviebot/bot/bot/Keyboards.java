@@ -7,6 +7,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 public class Keyboards {
 
@@ -67,7 +68,8 @@ public class Keyboards {
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup userGenreMenu(List<com.moviebot.bot.repo.GenreRepository.GenreWithCount> genres) {
+    public static InlineKeyboardMarkup userGenreMenu(List<com.moviebot.bot.repo.GenreRepository.GenreWithCount> genres,
+                                                     Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         List<InlineKeyboardButton> row = new ArrayList<>();
         for (var g : genres) {
@@ -79,14 +81,14 @@ public class Keyboards {
         }
         if (!row.isEmpty()) rows.add(row);
 
-        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        rows.add(List.of(button(tr.apply("common.back"), "USER:MENU")));
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup userGenreMoviePage(List<Movie> movies, Long genreId, int page) {
+    public static InlineKeyboardMarkup userGenreMoviePage(List<Movie> movies, Long genreId, int page, Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         addMoviePage(rows, movies, page, "MOVIE:", "UGP:" + genreId + ":");
-        rows.add(List.of(button("🔙 Janrlar", "USER:GENRES")));
+        rows.add(List.of(button(tr.apply("btn.toGenres"), "USER:GENRES")));
         return new InlineKeyboardMarkup(rows);
     }
 
@@ -131,10 +133,10 @@ public class Keyboards {
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup userMovieListPage(List<Movie> movies, int page) {
+    public static InlineKeyboardMarkup userMovieListPage(List<Movie> movies, int page, Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         addMoviePage(rows, movies, page, "MOVIE:", "USERLIST:");
-        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        rows.add(List.of(button(tr.apply("common.back"), "USER:MENU")));
         return new InlineKeyboardMarkup(rows);
     }
 
@@ -189,47 +191,59 @@ public class Keyboards {
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup userMainMenu() {
+    // Foydalanuvchi tugmalari tr orqali tarjima qilinadi (kalit -> matn, I18n.forLanguage)
+
+    public static InlineKeyboardMarkup languageMenu() {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        rows.add(List.of(button("🔍 Qidirish", "USER:SEARCH")));
-        rows.add(List.of(button("📽 Barchasini ko'rish", "USER:LIST_ALL")));
-        rows.add(List.of(button("🎭 Janrlar", "USER:GENRES")));
-        rows.add(List.of(button("🔥 Top 5", "USER:TOP")));
+        rows.add(List.of(button("🇺🇿 O'zbekcha", "LANG:uz")));
+        rows.add(List.of(button("🇷🇺 Русский", "LANG:ru")));
+        rows.add(List.of(button("🇬🇧 English", "LANG:en")));
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup userMovieListMenu(List<Movie> movies) {
+    public static InlineKeyboardMarkup userMainMenu(Function<String, String> tr) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button(tr.apply("menu.search"), "USER:SEARCH")));
+        rows.add(List.of(button(tr.apply("menu.all"), "USER:LIST_ALL")));
+        rows.add(List.of(button(tr.apply("menu.genres"), "USER:GENRES")));
+        rows.add(List.of(button(tr.apply("menu.top"), "USER:TOP")));
+        rows.add(List.of(button(tr.apply("menu.language"), "USER:LANGUAGE")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup userMovieListMenu(List<Movie> movies, Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         for (Movie m : movies) {
             rows.add(List.of(button(m.getCode() + " — " + m.getTitle(), "MOVIE:" + m.getCode())));
         }
-        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        rows.add(List.of(button(tr.apply("common.back"), "USER:MENU")));
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup backToUserMenu() {
+    public static InlineKeyboardMarkup backToUserMenu(Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        rows.add(List.of(button(tr.apply("common.back"), "USER:MENU")));
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup moviePosterMenu(String code) {
+    public static InlineKeyboardMarkup moviePosterMenu(String code, Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        rows.add(List.of(button("▶️ Video ko'rish", "WATCHMOVIE:" + code)));
-        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        rows.add(List.of(button(tr.apply("btn.watch"), "WATCHMOVIE:" + code)));
+        rows.add(List.of(button(tr.apply("common.back"), "USER:MENU")));
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup seasonListMenu(List<Season> seasons) {
+    public static InlineKeyboardMarkup seasonListMenu(List<Season> seasons, Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         for (Season s : seasons) {
-            rows.add(List.of(button(s.getSeasonNumber() + "-fasl", "SEASON:" + s.getId())));
+            rows.add(List.of(button(tr.apply("btn.season").replace("{0}", String.valueOf(s.getSeasonNumber())), "SEASON:" + s.getId())));
         }
-        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        rows.add(List.of(button(tr.apply("common.back"), "USER:MENU")));
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup episodeGridMenu(List<Episode> episodes, String movieCode, boolean singleSeason) {
+    public static InlineKeyboardMarkup episodeGridMenu(List<Episode> episodes, String movieCode, boolean singleSeason,
+                                                       Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         List<InlineKeyboardButton> currentRow = new ArrayList<>();
 
@@ -246,9 +260,9 @@ public class Keyboards {
         }
 
         if (singleSeason) {
-            rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+            rows.add(List.of(button(tr.apply("common.back"), "USER:MENU")));
         } else {
-            rows.add(List.of(button("🔙 Fasllarga", "SERIES:" + movieCode)));
+            rows.add(List.of(button(tr.apply("btn.toSeasons"), "SERIES:" + movieCode)));
         }
 
         return new InlineKeyboardMarkup(rows);
@@ -288,14 +302,14 @@ public class Keyboards {
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup episodeVideoMenu(Long seasonId, Long nextEpisodeId) {
+    public static InlineKeyboardMarkup episodeVideoMenu(Long seasonId, Long nextEpisodeId, Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
         if (nextEpisodeId != null) {
-            rows.add(List.of(button("▶️ Keyingi qism", "EPISODE:" + nextEpisodeId)));
+            rows.add(List.of(button(tr.apply("btn.nextEpisode"), "EPISODE:" + nextEpisodeId)));
         }
 
-        rows.add(List.of(button("🔙 Qismlarga", "SEASON:" + seasonId)));
+        rows.add(List.of(button(tr.apply("btn.toEpisodes"), "SEASON:" + seasonId)));
         return new InlineKeyboardMarkup(rows);
     }
 
@@ -328,7 +342,7 @@ public class Keyboards {
         return new InlineKeyboardMarkup(rows);
     }
 
-    public static InlineKeyboardMarkup subscriptionPromptMenu(List<RequiredChannel> channels) {
+    public static InlineKeyboardMarkup subscriptionPromptMenu(List<RequiredChannel> channels, Function<String, String> tr) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
         for (RequiredChannel c : channels) {
@@ -338,7 +352,7 @@ public class Keyboards {
             rows.add(List.of(button));
         }
 
-        rows.add(List.of(button("✅ Tekshirish", "CHECKSUB")));
+        rows.add(List.of(button(tr.apply("sub.check"), "CHECKSUB")));
         return new InlineKeyboardMarkup(rows);
     }
 
