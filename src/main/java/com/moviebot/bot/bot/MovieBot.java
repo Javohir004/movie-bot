@@ -12,7 +12,10 @@ import org.telegram.telegrambots.meta.api.methods.CopyMessage;
 import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.CreateChatInviteLink;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChat;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
+import org.telegram.telegrambots.meta.api.objects.ChatJoinRequest;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,7 +31,10 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -46,6 +52,8 @@ public class MovieBot extends TelegramLongPollingBot {
     private static final int CAPTION_RESERVE = 60;
     // Telegram limiti ~30 xabar/soniya, biz biroz past ushlaymiz
     private static final long BROADCAST_DELAY_MS = 40;
+
+    private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
 
     private final ExecutorService broadcastExecutor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean broadcastRunning = new AtomicBoolean(false);
@@ -125,10 +133,18 @@ public class MovieBot extends TelegramLongPollingBot {
         if (update.hasMessage() && update.getMessage().getFrom() != null) {
             return update.getMessage().getFrom().getId();
         }
+        if (update.hasChatJoinRequest() && update.getChatJoinRequest().getUser() != null) {
+            return update.getChatJoinRequest().getUser().getId();
+        }
         return null;
     }
 
     private void processUpdate(Update update) {
+        if (update.hasChatJoinRequest()) {
+            handleJoinRequest(update.getChatJoinRequest());
+            return;
+        }
+
         if (update.hasCallbackQuery()) {
             if (update.getCallbackQuery().getFrom() == null) return;
 
@@ -393,14 +409,39 @@ public class MovieBot extends TelegramLongPollingBot {
         if (data.equals("ADMIN:ADD_CHANNEL")) {
             sessionManager.clear(userId);
             sessionManager.setState(userId, AdminState.AWAITING_CHANNEL_USERNAME);
-            sendText(chatId, "Kanal usernameni yuboring (masalan @mychannel).\n\n⚠️ Bot shu kanal/guruhda admin bo'lishi shart, aks holda a'zolikni tekshira olmaydi.");
+            sendText(chatId, "Kanalni yuboring:\n\n"
+                    + "• Ochiq kanal — username (masalan @mychannel)\n"
+                    + "• Yopiq kanal — kanal ID'si (masalan -1001234567890). Bot o'zi zayavkali havola yaratadi, "
+                    + "zayavka yuborgan foydalanuvchi obuna bo'lgan hisoblanadi.\n\n"
+                    + "Yopiq kanal ID'sini bilish: kanalni web.telegram.org/a saytida oching, manzil qatoridagi # dan keyingi raqam.\n\n"
+                    + "⚠️ Bot shu kanalda admin bo'lishi shart (yopiq kanalda \"Foydalanuvchilarni taklif qilish\" huquqi bilan).");
+            return;
+        }
+
+        if (data.startsWith("CHDUR:") && sessionManager.getState(userId) == AdminState.AWAITING_CHANNEL_DURATION) {
+            finishAddChannel(chatId, userId, Integer.parseInt(data.substring("CHDUR:".length())));
             return;
         }
 
         if (data.startsWith("REMOVECHANNEL:")) {
             Long channelId = Long.parseLong(data.substring("REMOVECHANNEL:".length()));
-            requiredChannelService.remove(channelId);
-            sendText(chatId, "✅ Kanal olib tashlandi.");
+            requiredChannelService.findById(channelId).ifPresentOrElse(
+                    channel -> sendTextWithMarkup(chatId,
+                            channel.displayName() + " kanalini olib tashlaysizmi?\n\n"
+                                    + "👥 Bot orqali qo'shilganlar: " + requiredChannelService.joinCount(channelId)
+                                    + "\n\nO'chirilgandan keyin bu hisob ham o'chadi.",
+                            Keyboards.channelRemoveConfirmMenu(channelId)),
+                    () -> sendChannelList(chatId));
+            return;
+        }
+
+        if (data.startsWith("RMCHCONF:")) {
+            Long channelId = Long.parseLong(data.substring("RMCHCONF:".length()));
+            requiredChannelService.findById(channelId).ifPresent(channel -> {
+                long joins = requiredChannelService.joinCount(channelId);
+                requiredChannelService.remove(channelId);
+                sendText(chatId, "✅ " + channel.displayName() + " olib tashlandi.\n👥 Bot orqali qo'shilganlar: " + joins);
+            });
             sendChannelList(chatId);
             return;
         }
@@ -576,32 +617,15 @@ public class MovieBot extends TelegramLongPollingBot {
                 }
             }
             case AWAITING_EPISODE_VIDEO -> sendText(chatId, "Iltimos, video yuboring.");
-            case AWAITING_CHANNEL_USERNAME -> {
-                String cleaned = text.trim()
-                        .replace("https://t.me/", "")
-                        .replace("http://t.me/", "")
-                        .replace("t.me/", "");
-                if (cleaned.startsWith("@")) {
-                    cleaned = cleaned.substring(1);
+            case AWAITING_CHANNEL_USERNAME -> handleChannelInput(chatId, userId, text.trim());
+            case AWAITING_CHANNEL_DURATION -> {
+                try {
+                    int days = Integer.parseInt(text.trim());
+                    if (days < 1 || days > 3650) throw new NumberFormatException();
+                    finishAddChannel(chatId, userId, days);
+                } catch (NumberFormatException e) {
+                    sendText(chatId, "Kunlar sonini raqam bilan yozing (masalan 14) yoki tugmalardan birini tanlang.");
                 }
-
-                if (!cleaned.matches("[A-Za-z0-9_]{4,32}")) {
-                    sendText(chatId, "Username noto'g'ri. Masalan: @mychannel. Qaytadan yuboring:");
-                    return;
-                }
-
-                // bot kanalda admin bo'lmasa, a'zolikni tekshira olmaydi va obuna talabi jimgina ishlamay qoladi
-                String problem = checkBotIsChannelAdmin(cleaned);
-                if (problem != null) {
-                    sendText(chatId, "❌ @" + cleaned + " qo'shilmadi: " + problem
-                            + "\n\nBotni kanalga admin qilib, qaytadan yuboring:");
-                    return;
-                }
-
-                requiredChannelService.addChannel(cleaned);
-                sessionManager.clear(userId);
-                sendText(chatId, "✅ @" + cleaned + " qo'shildi.");
-                sendChannelList(chatId);
             }
             case AWAITING_BROADCAST_CONFIRM -> sendText(chatId, "Iltimos, tugmalardan birini bosing.");
             default -> sendText(chatId, "Nimadir xato ketdi. Qaytadan /start bosing.");
@@ -1422,15 +1446,32 @@ public class MovieBot extends TelegramLongPollingBot {
 
     private void sendChannelList(long chatId) {
         List<RequiredChannel> channels = requiredChannelService.getActiveChannels();
+        StringBuilder text = new StringBuilder("📢 <b>Majburiy kanallar</b>\n\n");
 
-        SendMessage message = new SendMessage(String.valueOf(chatId), "Majburiy kanallar:");
-        message.setReplyMarkup(Keyboards.channelListMenu(channels));
-
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
+        if (channels.isEmpty()) {
+            text.append("Hozircha kanal qo'shilmagan.");
         }
+
+        for (int i = 0; i < channels.size(); i++) {
+            RequiredChannel c = channels.get(i);
+            text.append(i + 1).append(". ").append(escape(c.displayName()));
+            if (c.getTitle() != null && c.getChannelUsername() != null) {
+                text.append(" (@").append(escape(c.getChannelUsername())).append(")");
+            }
+            if (c.isJoinRequest()) {
+                text.append(" 🔒 zayavka");
+            }
+            text.append("\n    👥 Bot orqali: ").append(requiredChannelService.joinCount(c.getId()));
+            text.append("\n    ⏳ ").append(describeExpiry(c.getExpiresAt())).append("\n\n");
+        }
+
+        sendHtml(chatId, text.toString(), Keyboards.channelListMenu(channels));
+    }
+
+    private String describeExpiry(LocalDateTime expiresAt) {
+        if (expiresAt == null) return "Muddatsiz";
+        long daysLeft = Math.max(0, java.time.Duration.between(LocalDateTime.now(), expiresAt).toDays());
+        return expiresAt.format(DATE_TIME) + " gacha (" + daysLeft + " kun qoldi)";
     }
 
 
@@ -1589,17 +1630,22 @@ public class MovieBot extends TelegramLongPollingBot {
         return TextFormat.formatCount(count);
     }
 
-    private boolean isMemberOf(String channelUsername, long userId) {
+    private boolean isMemberOf(RequiredChannel channel, long userId) {
+        // zayavkali kanalda zayavka yuborganining o'zi yetarli (API'ga murojaat qilmasdan)
+        if (channel.isJoinRequest() && requiredChannelService.hasJoinRequest(channel.getId(), userId)) {
+            return true;
+        }
+
         try {
             GetChatMember getChatMember = new GetChatMember();
-            getChatMember.setChatId("@" + channelUsername);
+            getChatMember.setChatId(channel.chatIdentifier());
             getChatMember.setUserId(userId);
             ChatMember member = execute(getChatMember);
             String status = member.getStatus();
             return !"left".equals(status) && !"kicked".equals(status);
         } catch (TelegramApiException e) {
             // tekshira olmasak foydalanuvchini to'smaymiz, lekin admin bilishi uchun logga yozamiz
-            log.warn("@{} kanalida a'zolikni tekshirib bo'lmadi (bot admin emasmi?): {}", channelUsername, e.getMessage());
+            log.warn("{} kanalida a'zolikni tekshirib bo'lmadi (bot admin emasmi?): {}", channel.chatIdentifier(), e.getMessage());
             return true;
         }
     }
@@ -1612,13 +1658,13 @@ public class MovieBot extends TelegramLongPollingBot {
                 || data.startsWith("EPISODE:");
     }
 
-    // null qaytarsa hammasi joyida, aks holda muammo matni
-    private String checkBotIsChannelAdmin(String channelUsername) {
+    // chatIdentifier: "@username" yoki "-100..."; null qaytarsa hammasi joyida, aks holda muammo matni
+    private String checkBotIsChannelAdmin(String chatIdentifier) {
         try {
             Long botId = execute(new GetMe()).getId();
 
             GetChatMember getChatMember = new GetChatMember();
-            getChatMember.setChatId("@" + channelUsername);
+            getChatMember.setChatId(chatIdentifier);
             getChatMember.setUserId(botId);
             String status = execute(getChatMember).getStatus();
 
@@ -1631,17 +1677,163 @@ public class MovieBot extends TelegramLongPollingBot {
         }
     }
 
+    private String fetchChatTitle(String chatIdentifier) {
+        try {
+            return execute(GetChat.builder().chatId(chatIdentifier).build()).getTitle();
+        } catch (TelegramApiException e) {
+            log.warn("{} kanal nomini olib bo'lmadi: {}", chatIdentifier, e.getMessage());
+            return null;
+        }
+    }
+
+    // yopiq kanal uchun zayavkali havola; bot "Foydalanuvchilarni taklif qilish" huquqiga ega bo'lishi kerak
+    private String createJoinRequestLink(String chatId) {
+        try {
+            return execute(CreateChatInviteLink.builder()
+                    .chatId(chatId)
+                    .name("Bot orqali")
+                    .createsJoinRequest(true)
+                    .build()).getInviteLink();
+        } catch (TelegramApiException e) {
+            log.warn("{} uchun havola yaratib bo'lmadi: {}", chatId, e.getMessage());
+            return null;
+        }
+    }
+
+    private void handleChannelInput(long chatId, long userId, String input) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+
+        if (input.matches("-100\\d{5,}")) {
+            String problem = checkBotIsChannelAdmin(input);
+            if (problem != null) {
+                sendText(chatId, "❌ Kanal qo'shilmadi: " + problem + "\n\nBotni kanalga admin qilib, qaytadan yuboring:");
+                return;
+            }
+            if (requiredChannelService.exists(null, input)) {
+                sendText(chatId, "Bu kanal allaqachon ro'yxatda. Boshqa kanal yuboring:");
+                return;
+            }
+
+            String link = createJoinRequestLink(input);
+            if (link == null) {
+                sendText(chatId, "❌ Havola yaratib bo'lmadi. Botga kanalda \"Foydalanuvchilarni taklif qilish\" huquqini bering va ID'ni qaytadan yuboring:");
+                return;
+            }
+
+            pending.setChannelChatId(input);
+            pending.setChannelUsername(null);
+            pending.setChannelInviteLink(link);
+            pending.setChannelJoinRequest(true);
+            pending.setChannelTitle(fetchChatTitle(input));
+        } else {
+            String cleaned = input
+                    .replace("https://t.me/", "")
+                    .replace("http://t.me/", "")
+                    .replace("t.me/", "");
+            if (cleaned.startsWith("@")) {
+                cleaned = cleaned.substring(1);
+            }
+
+            if (!cleaned.matches("[A-Za-z0-9_]{4,32}")) {
+                sendText(chatId, "Username yoki ID noto'g'ri. Masalan: @mychannel yoki -1001234567890. Qaytadan yuboring:");
+                return;
+            }
+
+            // bot kanalda admin bo'lmasa, a'zolikni tekshira olmaydi va obuna talabi jimgina ishlamay qoladi
+            String problem = checkBotIsChannelAdmin("@" + cleaned);
+            if (problem != null) {
+                sendText(chatId, "❌ @" + cleaned + " qo'shilmadi: " + problem
+                        + "\n\nBotni kanalga admin qilib, qaytadan yuboring:");
+                return;
+            }
+            if (requiredChannelService.exists(cleaned, null)) {
+                sendText(chatId, "Bu kanal allaqachon ro'yxatda. Boshqa kanal yuboring:");
+                return;
+            }
+
+            pending.setChannelUsername(cleaned);
+            pending.setChannelChatId(null);
+            pending.setChannelInviteLink(null);
+            pending.setChannelJoinRequest(false);
+            pending.setChannelTitle(fetchChatTitle("@" + cleaned));
+        }
+
+        sessionManager.setState(userId, AdminState.AWAITING_CHANNEL_DURATION);
+        String name = pending.getChannelTitle() != null ? pending.getChannelTitle()
+                : (pending.getChannelUsername() != null ? "@" + pending.getChannelUsername() : pending.getChannelChatId());
+        sendTextWithMarkup(chatId, "\"" + name + "\" uchun majburiy obuna muddati qancha?\n\nTugmani tanlang yoki kunlar sonini yozing (masalan 14):",
+                Keyboards.channelDurationMenu());
+    }
+
+    // days = 0 bo'lsa muddatsiz
+    private void finishAddChannel(long chatId, long userId, int days) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+
+        if (pending.getChannelUsername() == null && pending.getChannelChatId() == null) {
+            sessionManager.clear(userId);
+            sendText(chatId, "Jarayon topilmadi, kanalni qaytadan qo'shing.");
+            sendChannelList(chatId);
+            return;
+        }
+
+        LocalDateTime expiresAt = days == 0 ? null : LocalDateTime.now().plusDays(days);
+        RequiredChannel channel = requiredChannelService.add(
+                pending.getChannelUsername(),
+                pending.getChannelChatId(),
+                pending.getChannelTitle(),
+                pending.getChannelInviteLink(),
+                pending.isChannelJoinRequest(),
+                expiresAt);
+
+        sessionManager.clear(userId);
+        sendText(chatId, "✅ " + channel.displayName() + " qo'shildi. "
+                + (expiresAt == null ? "Muddatsiz." : "Muddat: " + expiresAt.format(DATE_TIME) + " gacha."));
+        sendChannelList(chatId);
+    }
+
+    // Kanalga bot ko'rsatganidan keyin qo'shilganlarni sanash uchun: kimga qaysi kanallar ko'rsatildi
+    private final Map<Long, Set<Long>> promptedChannels = new ConcurrentHashMap<>();
+
     private List<RequiredChannel> getUnjoinedChannels(long userId) {
         List<RequiredChannel> channels = requiredChannelService.getActiveChannels();
         List<RequiredChannel> unjoined = new ArrayList<>();
+        Set<Long> prompted = promptedChannels.getOrDefault(userId, Set.of());
 
         for (RequiredChannel channel : channels) {
-            if (!isMemberOf(channel.getChannelUsername(), userId)) {
+            if (!isMemberOf(channel, userId)) {
                 unjoined.add(channel);
+            } else if (prompted.contains(channel.getId())) {
+                // bot so'raganidan keyin qo'shildi
+                requiredChannelService.recordJoin(channel.getId(), userId, false);
             }
         }
 
+        if (unjoined.isEmpty()) {
+            promptedChannels.remove(userId);
+        } else {
+            Set<Long> ids = new HashSet<>();
+            unjoined.forEach(c -> ids.add(c.getId()));
+            promptedChannels.put(userId, ids);
+        }
+
         return unjoined;
+    }
+
+    // Zayavkali (yopiq) kanalga zayavka kelganda: shu foydalanuvchi obuna bo'lgan hisoblanadi
+    private void handleJoinRequest(ChatJoinRequest request) {
+        if (request.getChat() == null || request.getUser() == null) return;
+
+        String channelChatId = String.valueOf(request.getChat().getId());
+        requiredChannelService.findByChatId(channelChatId)
+                .filter(RequiredChannel::isJoinRequest)
+                .ifPresent(channel -> requiredChannelService.recordJoin(channel.getId(), request.getUser().getId(), true));
+    }
+
+    // Muddati tugagan kanal haqida va boshqa tizim xabarlari uchun
+    public void notifyAdmins(String text) {
+        for (User admin : userService.getAllAdmins()) {
+            sendText(admin.getUserId(), text);
+        }
     }
 
     private boolean ensureSubscribed(long chatId, long userId) {

@@ -263,8 +263,8 @@ public class Keyboards {
 
         for (RequiredChannel c : channels) {
             InlineKeyboardButton button = new InlineKeyboardButton();
-            button.setText("📢 @" + c.getChannelUsername());
-            button.setUrl("https://t.me/" + c.getChannelUsername());
+            button.setText("📢 " + c.displayName());
+            button.setUrl(c.url());
             rows.add(List.of(button));
         }
 
@@ -275,15 +275,31 @@ public class Keyboards {
     public static InlineKeyboardMarkup channelListMenu(List<RequiredChannel> channels) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
-        for (RequiredChannel c : channels) {
-            rows.add(List.of(
-                    button("@" + c.getChannelUsername(), "NOOP"),
-                    button("❌", "REMOVECHANNEL:" + c.getId())
-            ));
+        for (int i = 0; i < channels.size(); i++) {
+            RequiredChannel c = channels.get(i);
+            rows.add(List.of(button("❌ " + (i + 1) + ". " + c.displayName(), "REMOVECHANNEL:" + c.getId())));
         }
 
         rows.add(List.of(button("➕ Kanal qo'shish", "ADMIN:ADD_CHANNEL")));
         rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup channelDurationMenu() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("1 kun", "CHDUR:1"), button("3 kun", "CHDUR:3"), button("7 kun", "CHDUR:7")));
+        rows.add(List.of(button("15 kun", "CHDUR:15"), button("30 kun", "CHDUR:30")));
+        rows.add(List.of(button("♾ Muddatsiz", "CHDUR:0")));
+        rows.add(List.of(button("🔙 Bekor qilish", "BACK")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup channelRemoveConfirmMenu(Long channelId) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(
+                button("✅ Ha, olib tashla", "RMCHCONF:" + channelId),
+                button("❌ Yo'q", "ADMIN:CHANNELS")
+        ));
         return new InlineKeyboardMarkup(rows);
     }
 

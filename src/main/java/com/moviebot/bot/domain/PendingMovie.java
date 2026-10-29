@@ -34,5 +34,12 @@ public class PendingMovie {
     private Long broadcastSourceChatId;
     private Integer broadcastSourceMessageId;
 
+    // homiy kanal qo'shish jarayoni
+    private String channelUsername;
+    private String channelChatId;
+    private String channelTitle;
+    private String channelInviteLink;
+    private boolean channelJoinRequest;
+
     public boolean isEditing() { return editingCode != null; }
 }
