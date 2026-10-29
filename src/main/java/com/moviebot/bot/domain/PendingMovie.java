@@ -33,6 +33,8 @@ public class PendingMovie {
 
     private Long broadcastSourceChatId;
     private Integer broadcastSourceMessageId;
+    private String broadcastButtonText;
+    private String broadcastButtonUrl;
 
     // homiy kanal qo'shish jarayoni
     private String channelUsername;

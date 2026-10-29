@@ -5,13 +5,11 @@ import com.moviebot.bot.enums.AdminState;
 import com.moviebot.bot.enums.InviteStatus;
 import com.moviebot.bot.enums.MovieType;
 import com.moviebot.bot.service.*;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
 import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
-import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.CreateChatInviteLink;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChat;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
@@ -35,9 +33,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Component
@@ -50,13 +45,7 @@ public class MovieBot extends TelegramLongPollingBot {
     private static final int MAX_CAPTION_LENGTH = 1024;
     // keyin qo'shiladigan "Faslni tanlang:" kabi matnlar uchun zaxira
     private static final int CAPTION_RESERVE = 60;
-    // Telegram limiti ~30 xabar/soniya, biz biroz past ushlaymiz
-    private static final long BROADCAST_DELAY_MS = 40;
-
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
-
-    private final ExecutorService broadcastExecutor = Executors.newSingleThreadExecutor();
-    private final AtomicBoolean broadcastRunning = new AtomicBoolean(false);
 
     private final String username;
     private final MovieService movieService;
@@ -67,6 +56,7 @@ public class MovieBot extends TelegramLongPollingBot {
     private final AdminInviteService adminInviteService;
     private final RequiredChannelService requiredChannelService;
     private final StatsService statsService;
+    private final BroadcastService broadcastService;
     private final Long rootAdminId;
     private final String groupLink;
 
@@ -81,9 +71,11 @@ public class MovieBot extends TelegramLongPollingBot {
                     EpisodeService episodeService,
                     AdminInviteService adminInviteService,
                     RequiredChannelService requiredChannelService,
-                    StatsService statsService) {
+                    StatsService statsService,
+                    BroadcastService broadcastService) {
         super(token);
         this.statsService = statsService;
+        this.broadcastService = broadcastService;
         this.username = username;
         this.rootAdminId = rootAdminId;
         this.movieService = movieService;
@@ -254,6 +246,20 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
+        // Reklama kutilayotganda istalgan turdagi xabar (matn, rasm, video, GIF, fayl...) qabul qilinadi.
+        // Buyruqlar (/start va h.k.) bundan mustasno.
+        if (update.hasMessage() && update.getMessage().getFrom() != null) {
+            Message message = update.getMessage();
+            long userId = message.getFrom().getId();
+            boolean command = message.hasText() && message.getText().startsWith("/");
+
+            if (!command && sessionManager.getState(userId) == AdminState.AWAITING_BROADCAST_CONTENT
+                    && userService.isAdmin(userId)) {
+                captureBroadcastContent(message.getChatId(), userId, message);
+                return;
+            }
+        }
+
         if (update.hasMessage() && update.getMessage().hasPhoto()) {
             if (update.getMessage().getFrom() == null) return;
 
@@ -265,9 +271,7 @@ public class MovieBot extends TelegramLongPollingBot {
                 List<PhotoSize> photos = update.getMessage().getPhoto();
                 String fileId = photos.get(photos.size() - 1).getFileId();
 
-                if (state == AdminState.AWAITING_BROADCAST_CONTENT) {
-                    captureBroadcastContent(chatId, userId, update.getMessage());
-                } else if (state == AdminState.AWAITING_POSTER) {
+                if (state == AdminState.AWAITING_POSTER) {
                     handleMoviePoster(chatId, userId, fileId);
                 } else if (state == AdminState.AWAITING_SEASON_POSTER) {
                     handleSeasonPoster(chatId, userId, fileId);
@@ -288,9 +292,7 @@ public class MovieBot extends TelegramLongPollingBot {
                 AdminState state = sessionManager.getState(userId);
                 String fileId = update.getMessage().getVideo().getFileId();
 
-                if (state == AdminState.AWAITING_BROADCAST_CONTENT) {
-                    captureBroadcastContent(chatId, userId, update.getMessage());
-                } else if (state == AdminState.AWAITING_VIDEO) {
+                if (state == AdminState.AWAITING_VIDEO) {
                     finishAddMovie(chatId, userId, fileId);
                 } else if (state == AdminState.AWAITING_EPISODE_VIDEO) {
                     handleEpisodeVideo(chatId, userId, fileId);
@@ -329,10 +331,6 @@ public class MovieBot extends TelegramLongPollingBot {
             }
 
             if (userService.isAdmin(userId) && sessionManager.getState(userId) != AdminState.NONE) {
-                if (sessionManager.getState(userId) == AdminState.AWAITING_BROADCAST_CONTENT) {
-                    captureBroadcastContent(chatId, userId, update.getMessage());
-                    return;
-                }
                 handleAdminFlowInput(chatId, userId, text);
                 return;
             }
@@ -448,13 +446,58 @@ public class MovieBot extends TelegramLongPollingBot {
 
         if (data.equals("ADMIN:BROADCAST")) {
             sessionManager.clear(userId);
-            sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_CONTENT);
-            sendText(chatId, "Yubormoqchi bo'lgan xabarni (matn, rasm yoki video) yuboring. Bu barcha foydalanuvchilarga yuboriladi.");
+            sendTextWithMarkup(chatId, "📣 Reklama", Keyboards.broadcastMenu());
             return;
         }
 
+        if (data.equals("ADMIN:BROADCAST_NEW")) {
+            sessionManager.clear(userId);
+            sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_CONTENT);
+            sendText(chatId, "Reklama xabarini yuboring: matn, rasm, video, GIF, fayl — istalgan turdagi xabar.\n"
+                    + "U barcha foydalanuvchilarga xuddi shunday ko'rinishda yuboriladi.");
+            return;
+        }
+
+        if (data.equals("ADMIN:BROADCAST_SCHEDULED")) {
+            sendScheduledBroadcasts(chatId);
+            return;
+        }
+
+        if (data.equals("ADMIN:BROADCAST_HISTORY")) {
+            sendBroadcastHistory(chatId);
+            return;
+        }
+
+        if (data.startsWith("BCASTCANCEL:")) {
+            Long broadcastId = Long.parseLong(data.substring("BCASTCANCEL:".length()));
+            sendText(chatId, broadcastService.cancel(broadcastId)
+                    ? "✅ Reklama #" + broadcastId + " bekor qilindi."
+                    : "Reklama #" + broadcastId + " allaqachon yuborila boshlagan yoki bekor qilingan.");
+            sendScheduledBroadcasts(chatId);
+            return;
+        }
+
+        if (data.equals("BCAST:NOBTN") && sessionManager.getState(userId) == AdminState.AWAITING_BROADCAST_BUTTON) {
+            showBroadcastPreview(chatId, userId);
+            return;
+        }
+
+        // holat tekshiriladi: "Yuborish" ikki marta bosilsa ikkinchisi hech narsa qilmaydi
         if (data.equals("BROADCAST:SEND")) {
-            executeBroadcast(chatId, userId);
+            if (sessionManager.getState(userId) != AdminState.AWAITING_BROADCAST_CONFIRM) {
+                sendText(chatId, "Bu reklama allaqachon navbatga qo'yilgan yoki bekor qilingan.");
+                return;
+            }
+            scheduleBroadcast(chatId, userId, LocalDateTime.now());
+            return;
+        }
+
+        if (data.equals("BROADCAST:SCHEDULE") && sessionManager.getState(userId) == AdminState.AWAITING_BROADCAST_CONFIRM) {
+            sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_TIME);
+            sendText(chatId, "Yuborish vaqtini yozing:\n\n"
+                    + "• 20:00 — bugun (vaqt o'tib ketgan bo'lsa ertaga)\n"
+                    + "• 30.10 20:00\n"
+                    + "• 30.10.2026 20:00");
             return;
         }
 
@@ -628,6 +671,17 @@ public class MovieBot extends TelegramLongPollingBot {
                 }
             }
             case AWAITING_BROADCAST_CONFIRM -> sendText(chatId, "Iltimos, tugmalardan birini bosing.");
+            case AWAITING_BROADCAST_BUTTON -> BroadcastInput.parseButton(text).ifPresentOrElse(button -> {
+                pending.setBroadcastButtonText(button.text());
+                pending.setBroadcastButtonUrl(button.url());
+                showBroadcastPreview(chatId, userId);
+            }, () -> sendText(chatId, "Tugmani shunday yozing:\nKanalga o'tish | https://t.me/mykanal\n\n"
+                    + "Havola https:// yoki t.me/ bilan boshlanishi, matn 64 belgidan oshmasligi kerak.\n"
+                    + "Tugma kerak bo'lmasa, \"Tugmasiz davom etish\"ni bosing."));
+            case AWAITING_BROADCAST_TIME -> BroadcastInput.parseTime(text, LocalDateTime.now()).ifPresentOrElse(
+                    sendAt -> scheduleBroadcast(chatId, userId, sendAt),
+                    () -> sendText(chatId, "Vaqtni tushunmadim. Shunday yozing: 20:00, 30.10 20:00 yoki 30.10.2026 20:00.\n"
+                            + "Vaqt kelajakda va " + BroadcastInput.MAX_DAYS_AHEAD + " kun ichida bo'lishi kerak."));
             default -> sendText(chatId, "Nimadir xato ketdi. Qaytadan /start bosing.");
         }
     }
@@ -1869,111 +1923,118 @@ public class MovieBot extends TelegramLongPollingBot {
         PendingMovie pending = sessionManager.getPendingMovie(userId);
         pending.setBroadcastSourceChatId(chatId);
         pending.setBroadcastSourceMessageId(message.getMessageId());
-        sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_CONFIRM);
+        pending.setBroadcastButtonText(null);
+        pending.setBroadcastButtonUrl(null);
+        sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_BUTTON);
 
-        int count = userService.getAllActiveUserIds().size();
-
-        SendMessage confirm = new SendMessage(String.valueOf(chatId),
-                "Bu xabar " + count + " ta foydalanuvchiga yuboriladi. Tasdiqlaysizmi?");
-        confirm.setReplyMarkup(Keyboards.broadcastConfirmMenu());
-
-        try {
-            execute(confirm);
-        } catch (TelegramApiException e) {
-            log.error("Telegram so'rovi bajarilmadi", e);
-        }
+        sendTextWithMarkup(chatId, "Reklama ostiga havola tugmasi qo'shasizmi?\n\n"
+                        + "Qo'shish uchun shunday yozing:\nKanalga o'tish | https://t.me/mykanal",
+                Keyboards.broadcastButtonMenu());
     }
 
-    private void executeBroadcast(long chatId, long userId) {
+    // Reklama tayyor: adminga qanday ko'rinishini ko'rsatib, tasdiq so'raymiz
+    private void showBroadcastPreview(long chatId, long userId) {
         PendingMovie pending = sessionManager.getPendingMovie(userId);
-        Long sourceChatId = pending.getBroadcastSourceChatId();
-        Integer sourceMessageId = pending.getBroadcastSourceMessageId();
-        sessionManager.clear(userId);
-
-        // "Yuborish" ikki marta bosilsa yoki sessiya yo'qolgan bo'lsa
-        if (sourceChatId == null || sourceMessageId == null) {
-            sendText(chatId, "Yuboriladigan xabar topilmadi. Qaytadan urinib ko'ring.");
+        if (pending.getBroadcastSourceMessageId() == null) {
+            sessionManager.clear(userId);
+            sendText(chatId, "Reklama xabari topilmadi. Qaytadan boshlang.");
             sendAdminMenu(chatId);
             return;
         }
 
-        if (!broadcastRunning.compareAndSet(false, true)) {
-            sendText(chatId, "⏳ Boshqa reklama hali yuborilmoqda. U tugashini kuting.");
+        try {
+            CopyMessage preview = new CopyMessage();
+            preview.setChatId(String.valueOf(chatId));
+            preview.setFromChatId(String.valueOf(pending.getBroadcastSourceChatId()));
+            preview.setMessageId(pending.getBroadcastSourceMessageId());
+            if (pending.getBroadcastButtonUrl() != null) {
+                preview.setReplyMarkup(Keyboards.linkButton(pending.getBroadcastButtonText(), pending.getBroadcastButtonUrl()));
+            }
+            execute(preview);
+        } catch (TelegramApiException e) {
+            log.error("Reklama ko'rinishini yuborib bo'lmadi", e);
+        }
+
+        sessionManager.setState(userId, AdminState.AWAITING_BROADCAST_CONFIRM);
+        int count = userService.getAllActiveUserIds().size();
+        sendTextWithMarkup(chatId, "☝️ Reklama shunday ko'rinadi. U " + count + " ta foydalanuvchiga yuboriladi.\n\n"
+                        + "⚠️ Yuborilib bo'lguncha asl xabarni o'chirmang — reklama undan nusxalanadi.",
+                Keyboards.broadcastConfirmMenu());
+    }
+
+    private void scheduleBroadcast(long chatId, long userId, LocalDateTime sendAt) {
+        PendingMovie pending = sessionManager.getPendingMovie(userId);
+        if (pending.getBroadcastSourceMessageId() == null) {
+            sessionManager.clear(userId);
+            sendText(chatId, "Reklama xabari topilmadi. Qaytadan boshlang.");
+            sendAdminMenu(chatId);
             return;
         }
 
-        List<Long> userIds = userService.getAllActiveUserIds();
-        sendText(chatId, "⏳ " + userIds.size() + " ta foydalanuvchiga yuborish boshlandi. Tugagach xabar beraman.");
+        Broadcast broadcast = broadcastService.schedule(userId,
+                pending.getBroadcastSourceChatId(),
+                pending.getBroadcastSourceMessageId(),
+                pending.getBroadcastButtonText(),
+                pending.getBroadcastButtonUrl(),
+                sendAt);
+        sessionManager.clear(userId);
+
+        boolean now = !sendAt.isAfter(LocalDateTime.now());
+        sendText(chatId, now
+                ? "✅ Reklama #" + broadcast.getId() + " navbatga qo'yildi, bir necha soniyada yuborila boshlaydi."
+                : "✅ Reklama #" + broadcast.getId() + " " + sendAt.format(DATE_TIME) + " da yuboriladi.\n"
+                + "Bekor qilish: 📣 Reklama → 🗓 Rejalashtirilganlar.");
         sendAdminMenu(chatId);
-
-        // Asosiy update thread'ini band qilmaslik uchun alohida thread'da yuboramiz,
-        // aks holda yuborish tugaguncha bot hech kimga javob bermaydi
-        broadcastExecutor.submit(() -> {
-            int sent = 0;
-            int failed = 0;
-            List<Long> blocked = new ArrayList<>();
-
-            try {
-                for (Long targetId : userIds) {
-                    switch (copyWithRetry(targetId, sourceChatId, sourceMessageId)) {
-                        case SENT -> sent++;
-                        case BLOCKED -> blocked.add(targetId);
-                        case FAILED -> failed++;
-                    }
-                    Thread.sleep(BROADCAST_DELAY_MS);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } finally {
-                broadcastRunning.set(false);
-                try {
-                    userService.deactivate(blocked);
-                } catch (RuntimeException e) {
-                    log.error("Bloklagan foydalanuvchilarni belgilashda xato", e);
-                }
-                sendText(chatId, "✅ Yuborildi: " + sent + " ta.\n"
-                        + "🚫 Botni bloklagan: " + blocked.size() + " ta (endi ularga yuborilmaydi).\n"
-                        + "❌ Xato: " + failed + " ta.");
-            }
-        });
     }
 
-    private enum SendResult { SENT, BLOCKED, FAILED }
+    private void sendScheduledBroadcasts(long chatId) {
+        List<Broadcast> scheduled = broadcastService.findScheduled();
+        StringBuilder text = new StringBuilder("🗓 <b>Rejalashtirilgan reklamalar</b>\n\n");
 
-    private SendResult copyWithRetry(Long targetId, Long sourceChatId, Integer sourceMessageId) throws InterruptedException {
-        CopyMessage copyMessage = new CopyMessage();
-        copyMessage.setChatId(String.valueOf(targetId));
-        copyMessage.setFromChatId(String.valueOf(sourceChatId));
-        copyMessage.setMessageId(sourceMessageId);
-
-        try {
-            execute(copyMessage);
-            return SendResult.SENT;
-        } catch (TelegramApiRequestException e) {
-            // 403 Forbidden: bot bloklangan, akkaunt o'chirilgan yoki foydalanuvchi botni hech ochmagan
-            if (e.getErrorCode() != null && e.getErrorCode() == 403) {
-                return SendResult.BLOCKED;
-            }
-            // 429 Too Many Requests: Telegram aytgan vaqtcha kutib, bir marta qayta urinamiz
-            if (e.getErrorCode() != null && e.getErrorCode() == 429
-                    && e.getParameters() != null && e.getParameters().getRetryAfter() != null) {
-                Thread.sleep(e.getParameters().getRetryAfter() * 1000L);
-                try {
-                    execute(copyMessage);
-                    return SendResult.SENT;
-                } catch (TelegramApiException retryError) {
-                    return SendResult.FAILED;
+        if (scheduled.isEmpty()) {
+            text.append("Hozircha yo'q.");
+        } else {
+            for (Broadcast b : scheduled) {
+                text.append("#").append(b.getId()).append(" · ").append(b.getSendAt().format(DATE_TIME));
+                if (b.getButtonText() != null) {
+                    text.append(" · 🔘 ").append(escape(b.getButtonText()));
                 }
+                text.append("\n");
             }
-            return SendResult.FAILED;
-        } catch (TelegramApiException e) {
-            return SendResult.FAILED;
+            text.append("\nBekor qilish uchun pastdagi tugmani bosing.");
         }
+
+        sendHtml(chatId, text.toString(), Keyboards.scheduledBroadcastsMenu(scheduled, DATE_TIME));
     }
 
-    @PreDestroy
-    public void shutdownBroadcastExecutor() {
-        broadcastExecutor.shutdownNow();
+    private void sendBroadcastHistory(long chatId) {
+        List<Broadcast> recent = broadcastService.findRecentFinished(10);
+        StringBuilder text = new StringBuilder("📈 <b>Oxirgi reklamalar</b>\n\n");
+
+        if (recent.isEmpty()) {
+            text.append("Hozircha yuborilgan reklama yo'q.");
+        }
+
+        for (Broadcast b : recent) {
+            LocalDateTime when = b.getStartedAt() != null ? b.getStartedAt() : b.getSendAt();
+            text.append("#").append(b.getId()).append(" · ").append(when.format(DATE_TIME)).append(" · ")
+                    .append(switch (b.getStatus()) {
+                        case SENDING -> "⏳ yuborilmoqda";
+                        case INTERRUPTED -> "⚠️ to'xtab qolgan";
+                        default -> "✅ yakunlangan";
+                    })
+                    .append("\n    ✅ ").append(b.getSent())
+                    .append("  🚫 ").append(b.getBlocked())
+                    .append("  ❌ ").append(b.getFailed())
+                    .append("  (jami ").append(b.getTotal()).append(")\n\n");
+        }
+
+        sendHtml(chatId, text.toString(), Keyboards.backToBroadcastMenu());
+    }
+
+    // Boshqa komponentlar (reklama yuboruvchi va h.k.) adminga xabar yuborishi uchun
+    public void sendNotice(long chatId, String text) {
+        sendText(chatId, text);
     }
 
 

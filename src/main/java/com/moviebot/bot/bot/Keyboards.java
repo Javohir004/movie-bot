@@ -305,10 +305,48 @@ public class Keyboards {
 
     public static InlineKeyboardMarkup broadcastConfirmMenu() {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        rows.add(List.of(
-                button("✅ Yuborish", "BROADCAST:SEND"),
-                button("❌ Bekor qilish", "BROADCAST:CANCEL")
-        ));
+        rows.add(List.of(button("✅ Hozir yuborish", "BROADCAST:SEND")));
+        rows.add(List.of(button("🕒 Vaqtini belgilash", "BROADCAST:SCHEDULE")));
+        rows.add(List.of(button("❌ Bekor qilish", "BROADCAST:CANCEL")));
         return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup broadcastMenu() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("➕ Yangi reklama", "ADMIN:BROADCAST_NEW")));
+        rows.add(List.of(button("🗓 Rejalashtirilganlar", "ADMIN:BROADCAST_SCHEDULED")));
+        rows.add(List.of(button("📈 Hisobotlar", "ADMIN:BROADCAST_HISTORY")));
+        rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup broadcastButtonMenu() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("➡️ Tugmasiz davom etish", "BCAST:NOBTN")));
+        rows.add(List.of(button("❌ Bekor qilish", "BROADCAST:CANCEL")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup scheduledBroadcastsMenu(List<Broadcast> broadcasts, java.time.format.DateTimeFormatter format) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        for (Broadcast b : broadcasts) {
+            rows.add(List.of(button("❌ #" + b.getId() + " · " + b.getSendAt().format(format), "BCASTCANCEL:" + b.getId())));
+        }
+        rows.add(List.of(button("🔙 Orqaga", "ADMIN:BROADCAST")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup backToBroadcastMenu() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("🔙 Orqaga", "ADMIN:BROADCAST")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    // reklama ostidagi havola tugmasi
+    public static InlineKeyboardMarkup linkButton(String text, String url) {
+        InlineKeyboardButton button = new InlineKeyboardButton();
+        button.setText(text);
+        button.setUrl(url);
+        return new InlineKeyboardMarkup(List.of(List.of(button)));
     }
 }
