@@ -5,7 +5,11 @@ import com.moviebot.bot.enums.AdminState;
 import com.moviebot.bot.enums.InviteStatus;
 import com.moviebot.bot.enums.MovieType;
 import com.moviebot.bot.service.*;
+import jakarta.annotation.PreDestroy;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.PhotoSize;
@@ -23,9 +27,25 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class MovieBot extends TelegramLongPollingBot {
+
+    // callback data 64 bayt bilan cheklangan ("ADMIN_SEASONS:" + kod ham shunga sig'ishi kerak)
+    private static final int MAX_CODE_LENGTH = 20;
+    private static final String CODE_PATTERN = "[A-Za-z0-9_-]{1," + MAX_CODE_LENGTH + "}";
+    // Telegram rasm/video caption'i uchun limit
+    private static final int MAX_CAPTION_LENGTH = 1024;
+    // keyin qo'shiladigan "Faslni tanlang:" kabi matnlar uchun zaxira
+    private static final int CAPTION_RESERVE = 60;
+    // Telegram limiti ~30 xabar/soniya, biz biroz past ushlaymiz
+    private static final long BROADCAST_DELAY_MS = 40;
+
+    private final ExecutorService broadcastExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean broadcastRunning = new AtomicBoolean(false);
 
     private final String username;
     private final MovieService movieService;
@@ -83,9 +103,12 @@ public class MovieBot extends TelegramLongPollingBot {
         if (update.hasCallbackQuery()) {
             if (update.getCallbackQuery().getFrom() == null) return;
 
+            answerCallback(update.getCallbackQuery().getId());
+
             String data = update.getCallbackQuery().getData();
             long chatId = update.getCallbackQuery().getMessage().getChatId();
             long userId = update.getCallbackQuery().getFrom().getId();
+            Integer messageId = update.getCallbackQuery().getMessage().getMessageId();
 
             if (data.equals("USER:MENU")) {
                 sendUserStart(chatId);
@@ -108,7 +131,15 @@ public class MovieBot extends TelegramLongPollingBot {
             if (data.equals("USER:LIST_ALL")) {
                 if (!ensureSubscribed(chatId, userId)) return;
 
-                sendUserMovieList(chatId);
+                sendUserMovieList(chatId, 0, null);
+                return;
+            }
+
+            if (data.startsWith("USERLIST:")) {
+                if (!ensureSubscribed(chatId, userId)) return;
+
+                int page = Integer.parseInt(data.substring("USERLIST:".length()));
+                sendUserMovieList(chatId, page, messageId);
                 return;
             }
 
@@ -169,7 +200,7 @@ public class MovieBot extends TelegramLongPollingBot {
             }
 
             if (userService.isAdmin(userId)) {
-                handleAdminCallback(chatId, userId, data);
+                handleAdminCallback(chatId, userId, messageId, data);
             }
 
             return;
@@ -278,7 +309,7 @@ public class MovieBot extends TelegramLongPollingBot {
 
 
     /// handle..
-    private void handleAdminCallback(long chatId, long userId, String data) {
+    private void handleAdminCallback(long chatId, long userId, Integer messageId, String data) {
 
         if (data.equals("BACK")) {
             goBack(chatId, userId);
@@ -366,6 +397,12 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
+        if (data.startsWith("ADMINLIST:")) {
+            int page = Integer.parseInt(data.substring("ADMINLIST:".length()));
+            sendMovieList(chatId, page, messageId);
+            return;
+        }
+
         if (data.equals("ADMIN:MENU")) {
             sessionManager.clear(userId);
             sendAdminMenu(chatId);
@@ -436,7 +473,21 @@ public class MovieBot extends TelegramLongPollingBot {
                 askCode(chatId, userId);
             }
             case AWAITING_CODE -> {
-                pending.setCode(text.trim());
+                String code = text.trim();
+                boolean keepsOwnCode = pending.isEditing() && code.equals(pending.getEditingCode());
+
+                if (!keepsOwnCode && !code.matches(CODE_PATTERN)) {
+                    sendText(chatId, "Kod faqat lotin harflari, raqamlar, \"-\" va \"_\" dan iborat bo'lishi va "
+                            + MAX_CODE_LENGTH + " belgidan oshmasligi kerak. Qaytadan kiriting:");
+                    return;
+                }
+
+                if (!keepsOwnCode && movieService.isCodeTaken(code)) {
+                    sendText(chatId, "Bu kod allaqachon band. Boshqa kod kiriting:");
+                    return;
+                }
+
+                pending.setCode(code);
                 askType(chatId, userId);
             }
             case AWAITING_DESCRIPTION -> {
@@ -1058,6 +1109,14 @@ public class MovieBot extends TelegramLongPollingBot {
         }
     }
 
+    private void answerCallback(String callbackQueryId) {
+        try {
+            execute(new AnswerCallbackQuery(callbackQueryId));
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void sendText(long chatId, String text) {
         SendMessage message = new SendMessage(String.valueOf(chatId), text);
         try {
@@ -1079,6 +1138,10 @@ public class MovieBot extends TelegramLongPollingBot {
     }
 
     private void sendMovieList(long chatId) {
+        sendMovieList(chatId, 0, null);
+    }
+
+    private void sendMovieList(long chatId, int page, Integer editMessageId) {
         List<Movie> movies = movieService.findAll();
 
         if (movies.isEmpty()) {
@@ -1086,17 +1149,10 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
-        SendMessage message = new SendMessage(String.valueOf(chatId), "Barcha kino/seriallar:");
-        message.setReplyMarkup(Keyboards.movieListMenu(movies));
-
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            e.printStackTrace();
-        }
+        sendOrEditList(chatId, editMessageId, "Barcha kino/seriallar:", Keyboards.movieListMenu(movies, page));
     }
 
-    private void sendUserMovieList(long chatId) {
+    private void sendUserMovieList(long chatId, int page, Integer editMessageId) {
         List<Movie> movies = movieService.findAll();
 
         if (movies.isEmpty()) {
@@ -1104,11 +1160,23 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
-        SendMessage message = new SendMessage(String.valueOf(chatId), "Barcha kino/serial/animelar:");
-        message.setReplyMarkup(Keyboards.userMovieListMenu(movies));
+        sendOrEditList(chatId, editMessageId, "Barcha kino/serial/animelar:", Keyboards.userMovieListPage(movies, page));
+    }
 
+    // Sahifa almashtirilganda yangi xabar yubormasdan, mavjud xabarning tugmalarini almashtiradi
+    private void sendOrEditList(long chatId, Integer editMessageId, String text, InlineKeyboardMarkup markup) {
         try {
-            execute(message);
+            if (editMessageId != null) {
+                EditMessageReplyMarkup edit = new EditMessageReplyMarkup();
+                edit.setChatId(String.valueOf(chatId));
+                edit.setMessageId(editMessageId);
+                edit.setReplyMarkup(markup);
+                execute(edit);
+            } else {
+                SendMessage message = new SendMessage(String.valueOf(chatId), text);
+                message.setReplyMarkup(markup);
+                execute(message);
+            }
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }
@@ -1416,20 +1484,44 @@ public class MovieBot extends TelegramLongPollingBot {
 
 
     private String buildMovieCaption(Movie movie) {
-        return "🎬 <b>" + escape(movie.getTitle()) + "</b>\n\n"
-                + "📖 " + escape(movie.getDescription()) + "\n\n"
-                + "👁 Ko'rishlar: " + formatCount(effectiveViewCount(movie)) + "\n"
-                + "🆔 Kodi: " + movie.getCode() + "\n\n"
+        String header = "🎬 <b>" + escape(movie.getTitle()) + "</b>\n\n";
+        String footer = "\n\n👁 Ko'rishlar: " + formatCount(effectiveViewCount(movie)) + "\n"
+                + "🆔 Kodi: " + escape(movie.getCode()) + "\n\n"
                 + "📢 Guruhimiz: " + groupLink;
+        return header + "📖 " + fitDescription(movie.getDescription(), header + footer) + footer;
     }
 
     private String buildSeasonCaption(Season season) {
-        return "🎬 <b>" + escape(season.getMovie().getTitle()) + "</b>\n"
-                + season.getSeasonNumber() + "-fasl\n\n"
-                + "📖 " + escape(season.getMovie().getDescription()) + "\n\n"
-                + "👁 Ko'rishlar: " + formatCount(season.getViewCount()) + "\n"
-                + "🆔 Kodi: " + season.getMovie().getCode() + "\n\n"
+        Movie movie = season.getMovie();
+        String header = "🎬 <b>" + escape(movie.getTitle()) + "</b>\n"
+                + season.getSeasonNumber() + "-fasl\n\n";
+        String footer = "\n\n👁 Ko'rishlar: " + formatCount(season.getViewCount()) + "\n"
+                + "🆔 Kodi: " + escape(movie.getCode()) + "\n\n"
                 + "📢 Guruhimiz: " + groupLink;
+        return header + "📖 " + fitDescription(movie.getDescription(), header + footer) + footer;
+    }
+
+    // Tavsifni caption limitiga sig'adigan qilib qisqartiradi.
+    // Teglar va &amp; ham hisobga kiradi, shuning uchun hisob har doim zaxira bilan chiqadi.
+    private String fitDescription(String description, String rest) {
+        if (description == null) return "";
+
+        int available = MAX_CAPTION_LENGTH - CAPTION_RESERVE - rest.length() - "📖 ".length();
+        if (available <= 0) return "";
+
+        String text = description;
+        if (escape(text).length() > available) {
+            text = text.substring(0, Math.max(0, Math.min(text.length(), available) - 1));
+            while (!text.isEmpty() && escape(text).length() > available - 1) {
+                text = text.substring(0, text.length() - 1);
+            }
+            // emoji (surrogate pair) o'rtasidan kesilib qolmasin
+            if (!text.isEmpty() && Character.isHighSurrogate(text.charAt(text.length() - 1))) {
+                text = text.substring(0, text.length() - 1);
+            }
+            text = text + "…";
+        }
+        return escape(text);
     }
 
     private String escape(String text) {
@@ -1522,27 +1614,78 @@ public class MovieBot extends TelegramLongPollingBot {
         PendingMovie pending = sessionManager.getPendingMovie(userId);
         Long sourceChatId = pending.getBroadcastSourceChatId();
         Integer sourceMessageId = pending.getBroadcastSourceMessageId();
+        sessionManager.clear(userId);
 
-        List<Long> userIds = userService.getAllActiveUserIds();
-        int sent = 0;
-        int failed = 0;
-
-        for (Long targetId : userIds) {
-            try {
-                CopyMessage copyMessage = new CopyMessage();
-                copyMessage.setChatId(String.valueOf(targetId));
-                copyMessage.setFromChatId(String.valueOf(sourceChatId));
-                copyMessage.setMessageId(sourceMessageId);
-                execute(copyMessage);
-                sent++;
-            } catch (TelegramApiException e) {
-                failed++;
-            }
+        // "Yuborish" ikki marta bosilsa yoki sessiya yo'qolgan bo'lsa
+        if (sourceChatId == null || sourceMessageId == null) {
+            sendText(chatId, "Yuboriladigan xabar topilmadi. Qaytadan urinib ko'ring.");
+            sendAdminMenu(chatId);
+            return;
         }
 
-        sessionManager.clear(userId);
-        sendText(chatId, "✅ Yuborildi: " + sent + " ta.\n❌ Xato: " + failed + " ta.");
+        if (!broadcastRunning.compareAndSet(false, true)) {
+            sendText(chatId, "⏳ Boshqa reklama hali yuborilmoqda. U tugashini kuting.");
+            return;
+        }
+
+        List<Long> userIds = userService.getAllActiveUserIds();
+        sendText(chatId, "⏳ " + userIds.size() + " ta foydalanuvchiga yuborish boshlandi. Tugagach xabar beraman.");
         sendAdminMenu(chatId);
+
+        // Asosiy update thread'ini band qilmaslik uchun alohida thread'da yuboramiz,
+        // aks holda yuborish tugaguncha bot hech kimga javob bermaydi
+        broadcastExecutor.submit(() -> {
+            int sent = 0;
+            int failed = 0;
+
+            try {
+                for (Long targetId : userIds) {
+                    if (copyWithRetry(targetId, sourceChatId, sourceMessageId)) {
+                        sent++;
+                    } else {
+                        failed++;
+                    }
+                    Thread.sleep(BROADCAST_DELAY_MS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                broadcastRunning.set(false);
+                sendText(chatId, "✅ Yuborildi: " + sent + " ta.\n❌ Xato: " + failed + " ta.");
+            }
+        });
+    }
+
+    private boolean copyWithRetry(Long targetId, Long sourceChatId, Integer sourceMessageId) throws InterruptedException {
+        CopyMessage copyMessage = new CopyMessage();
+        copyMessage.setChatId(String.valueOf(targetId));
+        copyMessage.setFromChatId(String.valueOf(sourceChatId));
+        copyMessage.setMessageId(sourceMessageId);
+
+        try {
+            execute(copyMessage);
+            return true;
+        } catch (TelegramApiRequestException e) {
+            // 429 Too Many Requests: Telegram aytgan vaqtcha kutib, bir marta qayta urinamiz
+            if (e.getErrorCode() != null && e.getErrorCode() == 429
+                    && e.getParameters() != null && e.getParameters().getRetryAfter() != null) {
+                Thread.sleep(e.getParameters().getRetryAfter() * 1000L);
+                try {
+                    execute(copyMessage);
+                    return true;
+                } catch (TelegramApiException retryError) {
+                    return false;
+                }
+            }
+            return false;
+        } catch (TelegramApiException e) {
+            return false;
+        }
+    }
+
+    @PreDestroy
+    public void shutdownBroadcastExecutor() {
+        broadcastExecutor.shutdownNow();
     }
 
 
