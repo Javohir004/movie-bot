@@ -58,7 +58,9 @@ Telegram Update
    PostgreSQL
 ```
 
-Admin conversations (adding/editing a movie, adding seasons & episodes) are managed through a lightweight **in-memory session state machine** (`AdminSessionManager`), so multiple admins can work independently at the same time.
+Admin conversations (adding/editing a movie, adding seasons & episodes) are managed through a lightweight **session state machine** (`AdminSessionManager`), so multiple admins can work independently at the same time. Sessions are persisted to the `admin_sessions` table, so an unfinished flow survives a restart.
+
+The database schema is managed by **Flyway** (`src/main/resources/db/migration`); Hibernate only validates it on startup.
 
 ## 📂 Project Structure
 
@@ -105,59 +107,76 @@ src/main/java/com/moviebot/bot/
 | `episodes`      | Linked to a season, has an episode number + `file_id`                          |
 | `users`         | Telegram user ID, first name, role (`USER` / `ADMIN`)                          |
 | `admin_invites` | One-time admin invite tokens: creator, target (once claimed), status, expiry   |
+| `admin_sessions`| Unfinished admin flows (state + pending data as JSON), restored after restart  |
+| `required_channels` | Channels users must join before using the bot                            |
 
 Deletions are **soft deletes** — an `is_active` flag is toggled instead of removing rows, keeping the data recoverable.
 
 ## 🚀 Getting Started
 
-### Prerequisites
-- Java 17+
-- Maven
-- PostgreSQL
-- A Telegram bot token (create one via [@BotFather](https://t.me/BotFather))
+> 🇺🇿 Step-by-step server installation guide in Uzbek: [docs/INSTALL_UZ.md](docs/INSTALL_UZ.md)
 
-### 1. Clone the repository
+### Configuration
+
+All settings come from environment variables. Copy the example file and fill it in:
 
 ```bash
-git clone https://github.com/your-username/movie-bot.git
-cd movie-bot
+cp .env.example .env
 ```
 
-### 2. Create the database
+| Variable         | Required | Description                                              |
+|------------------|----------|----------------------------------------------------------|
+| `BOT_TOKEN`      | yes      | Token from [@BotFather](https://t.me/BotFather)           |
+| `BOT_USERNAME`   | yes      | Bot username without `@`                                  |
+| `ROOT_ADMIN_ID`  | yes      | Telegram ID of the main admin (get it from @userinfobot)  |
+| `DB_PASSWORD`    | yes      | PostgreSQL password                                       |
+| `BOT_GROUP_LINK` | no       | Group/channel shown under each title, e.g. `@mygroup`     |
+| `DB_URL`, `DB_USERNAME` | no | Only for running without Docker (defaults: local `moviebot` DB, `postgres`) |
+| `BACKUP_KEEP_DAYS` | no     | How many days of daily backups to keep (default `7`)      |
 
-```sql
-CREATE DATABASE moviebot;
-```
+> `.env` is git-ignored — never commit real credentials. `application.properties` only contains `${...}` placeholders.
 
-### 3. Configure the application
+### Option A: Docker (recommended)
 
-Copy the example config and fill in your own values:
+Requires Docker with Compose.
 
 ```bash
-cp src/main/resources/application.properties.example src/main/resources/application.properties
+docker compose up -d --build
+docker compose logs -f bot
 ```
 
-```properties
-bot.token=YOUR_BOT_TOKEN
-bot.username=your_bot_username
-bot.root-admin-id=YOUR_TELEGRAM_USER_ID
+This starts PostgreSQL, the bot, and a backup job that saves a compressed dump to `./backups` once a day.
 
-spring.datasource.url=jdbc:postgresql://localhost:5432/moviebot
-spring.datasource.username=postgres
-spring.datasource.password=YOUR_DB_PASSWORD
-```
+### Option B: Run locally
 
-> `application.properties` is git-ignored — never commit real credentials.
-
-Your Telegram user ID can be obtained from bots like **@userinfobot**.
-
-### 4. Run the application
+Requires Java 17+ and a PostgreSQL database named `moviebot` (`CREATE DATABASE moviebot;`).
 
 ```bash
-mvn spring-boot:run
+./mvnw spring-boot:run
 ```
 
-The first time it starts, the account set in `bot.root-admin-id` is automatically registered as an admin.
+Run it from the project root so the `.env` file is picked up. Environment variables override values from `.env`.
+
+On first start Flyway creates the schema, and the account in `ROOT_ADMIN_ID` is registered as an admin. An existing database created before Flyway is detected automatically (baseline) and only newer migrations are applied.
+
+### Running tests
+
+```bash
+./mvnw test
+```
+
+Unit tests need neither a database nor a bot token.
+
+### Restoring a backup
+
+Restore into an **empty** database, and start the bot only afterwards (otherwise Flyway creates the tables first and the restore conflicts with them):
+
+```bash
+docker compose down -v        # ⚠️ deletes the current database volume
+docker compose up -d db
+gunzip -c backups/moviebot-YYYYMMDD-HHMMSS.sql.gz | docker compose exec -T db psql -U postgres -d moviebot
+docker compose up -d
+```
 
 ## 🤖 Usage
 
@@ -187,10 +206,8 @@ The first time it starts, the account set in `bot.root-admin-id` is automaticall
 
 - Dedicated panel to view/restore/permanently delete soft-deleted entries
 - Favorites list, genre filtering, search history
-- Pagination for large catalogs
-- Migration tooling (Flyway/Liquibase) instead of `ddl-auto: update`
-- Persisted admin sessions (currently in-memory, reset on restart)
-- Structured logging instead of `printStackTrace`
+- Multi-language interface (Uzbek / Russian / English)
+- Admin statistics dashboard
 
 ## 📄 License
 

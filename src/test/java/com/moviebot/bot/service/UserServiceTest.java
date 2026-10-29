@@ -68,6 +68,20 @@ class UserServiceTest {
     }
 
     @Test
+    void touchUpdatesLastSeenOnlyOncePerInterval() {
+        User user = User.builder().userId(1L).active(false).build();
+        when(repository.findByUserId(1L)).thenReturn(Optional.of(user));
+
+        service.touch(1L);
+        service.touch(1L);
+        service.touch(1L);
+
+        assertThat(user.getLastSeenAt()).isNotNull();
+        assertThat(user.isActive()).isTrue();
+        verify(repository, times(1)).findByUserId(1L);
+    }
+
+    @Test
     void deactivateWithNoIdsTouchesNothing() {
         service.deactivate(List.of());
 

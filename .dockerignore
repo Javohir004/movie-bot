@@ -1,0 +1,8 @@
+target/
+backups/
+.git/
+.idea/
+.vscode/
+*.iml
+# maxfiy qiymatlar image ichiga tushmasin, ular docker-compose orqali beriladi
+.env
