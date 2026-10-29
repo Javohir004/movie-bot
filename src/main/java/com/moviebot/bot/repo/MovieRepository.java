@@ -23,6 +23,10 @@ public interface MovieRepository extends JpaRepository<Movie, Long> {
 
     boolean existsByCodeIgnoreCase(String code);
 
+    @Query(value = "select m.* from movies m join movie_genres mg on mg.movie_id = m.id "
+            + "where mg.genre_id = :genreId and m.is_active = true order by m.title", nativeQuery = true)
+    List<Movie> findActiveByGenre(@Param("genreId") Long genreId);
+
     Optional<Movie> findFirstByCodeIgnoreCaseAndActiveTrueOrderByIdAsc(String code);
 
     // Nomni kichik harflarga o'tkazib, turli apostroflarni bitta (') ga keltirib qidiradi.

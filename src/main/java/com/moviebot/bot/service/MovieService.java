@@ -85,12 +85,16 @@ public class MovieService {
         return movieRepository.findAllByActiveTrue();
     }
 
+    public List<Movie> findByGenre(Long genreId) {
+        return movieRepository.findActiveByGenre(genreId);
+    }
+
     public Movie getById(Long id) {
         return movieRepository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("Movie topilmadi: id=" + id));
     }
 
-    public void save(String title, String code, MovieType type, String description, String fileId, String posterFileId) {
+    public Movie save(String title, String code, MovieType type, String description, String fileId, String posterFileId) {
         Movie movie = Movie.builder()
                 .title(title)
                 .code(code)
@@ -101,7 +105,7 @@ public class MovieService {
                 .active(true)
                 .build();
 
-        movieRepository.save(movie);
+        return movieRepository.save(movie);
     }
 
     public Movie saveWithoutVideo(String title, String code, MovieType type, String description) {
@@ -116,7 +120,7 @@ public class MovieService {
         return movieRepository.save(movie);
     }
 
-    public void update(String originalCode, String title, String code, MovieType type, String description,
+    public Movie update(String originalCode, String title, String code, MovieType type, String description,
                        String fileId, String posterFileId) {
         Movie movie = movieRepository.findByCodeAndActiveTrue(originalCode)
                 .orElseThrow(() -> new IllegalStateException("Movie topilmadi: " + originalCode));
@@ -133,7 +137,7 @@ public class MovieService {
             movie.setPosterFileId(posterFileId);
         }
 
-        movieRepository.save(movie);
+        return movieRepository.save(movie);
     }
 
     public void incrementViewCount(Movie movie) {

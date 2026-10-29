@@ -57,6 +57,7 @@ public class MovieBot extends TelegramLongPollingBot {
     private final RequiredChannelService requiredChannelService;
     private final StatsService statsService;
     private final BroadcastService broadcastService;
+    private final GenreService genreService;
     private final Long rootAdminId;
     private final String groupLink;
 
@@ -72,10 +73,12 @@ public class MovieBot extends TelegramLongPollingBot {
                     AdminInviteService adminInviteService,
                     RequiredChannelService requiredChannelService,
                     StatsService statsService,
-                    BroadcastService broadcastService) {
+                    BroadcastService broadcastService,
+                    GenreService genreService) {
         super(token);
         this.statsService = statsService;
         this.broadcastService = broadcastService;
+        this.genreService = genreService;
         this.username = username;
         this.rootAdminId = rootAdminId;
         this.movieService = movieService;
@@ -177,6 +180,29 @@ public class MovieBot extends TelegramLongPollingBot {
 
                 int page = Integer.parseInt(data.substring("USERLIST:".length()));
                 sendUserMovieList(chatId, page, messageId);
+                return;
+            }
+
+            if (data.equals("USER:GENRES")) {
+                if (!ensureSubscribed(chatId, userId)) return;
+
+                sendUserGenres(chatId);
+                return;
+            }
+
+            if (data.startsWith("GENRE:")) {
+                if (!ensureSubscribed(chatId, userId)) return;
+
+                sendGenreMovies(chatId, Long.parseLong(data.substring("GENRE:".length())), 0, null);
+                return;
+            }
+
+            // UGP:<janrId>:<sahifa>
+            if (data.startsWith("UGP:")) {
+                if (!ensureSubscribed(chatId, userId)) return;
+
+                String[] parts = data.split(":");
+                sendGenreMovies(chatId, Long.parseLong(parts[1]), Integer.parseInt(parts[2]), messageId);
                 return;
             }
 
@@ -518,6 +544,54 @@ public class MovieBot extends TelegramLongPollingBot {
             return;
         }
 
+        if (data.equals("ADMIN:GENRES")) {
+            sessionManager.clear(userId);
+            sendGenreAdminList(chatId);
+            return;
+        }
+
+        if (data.equals("ADMIN:ADD_GENRE")) {
+            sessionManager.clear(userId);
+            sessionManager.setState(userId, AdminState.AWAITING_GENRE_NAME);
+            sendTextWithMarkup(chatId, "Janr nomini yozing. Bir nechtasini vergul bilan ajratib yozsangiz bo'ladi:\n"
+                    + "Komediya, Drama, Jangari", Keyboards.backOnly());
+            return;
+        }
+
+        if (data.startsWith("RMGENRE:")) {
+            Long genreId = Long.parseLong(data.substring("RMGENRE:".length()));
+            genreService.findById(genreId).ifPresentOrElse(
+                    genre -> sendTextWithMarkup(chatId, "\"" + genre.getName() + "\" janrini o'chirasizmi?\n"
+                                    + "Kinolarning o'zi o'chmaydi, faqat ulardan bu janr olib tashlanadi.",
+                            Keyboards.genreRemoveConfirmMenu(genreId)),
+                    () -> sendGenreAdminList(chatId));
+            return;
+        }
+
+        if (data.startsWith("RMGENRECONF:")) {
+            Long genreId = Long.parseLong(data.substring("RMGENRECONF:".length()));
+            genreService.findById(genreId).ifPresent(genre -> {
+                genreService.remove(genreId);
+                sendText(chatId, "✅ \"" + genre.getName() + "\" o'chirildi.");
+            });
+            sendGenreAdminList(chatId);
+            return;
+        }
+
+        if (data.startsWith("MGENRES:")) {
+            sendMovieGenreToggle(chatId, Long.parseLong(data.substring("MGENRES:".length())), null);
+            return;
+        }
+
+        // MGT:<kinoId>:<janrId> — belgilash/olib tashlash, keyin o'sha xabarning tugmalari yangilanadi
+        if (data.startsWith("MGT:")) {
+            String[] parts = data.split(":");
+            Long movieId = Long.parseLong(parts[1]);
+            genreService.toggle(movieId, Long.parseLong(parts[2]));
+            sendMovieGenreToggle(chatId, movieId, messageId);
+            return;
+        }
+
         if (data.startsWith("ADMINLIST:")) {
             int page = Integer.parseInt(data.substring("ADMINLIST:".length()));
             sendMovieList(chatId, page, messageId);
@@ -663,6 +737,22 @@ public class MovieBot extends TelegramLongPollingBot {
             }
             case AWAITING_EPISODE_VIDEO -> sendText(chatId, "Iltimos, video yuboring.");
             case AWAITING_CHANNEL_USERNAME -> handleChannelInput(chatId, userId, text.trim());
+            case AWAITING_GENRE_NAME -> {
+                GenreService.AddResult result = genreService.addAll(text);
+                sessionManager.clear(userId);
+
+                StringBuilder reply = new StringBuilder();
+                if (!result.added().isEmpty()) {
+                    reply.append("✅ Qo'shildi: ").append(String.join(", ", result.added()));
+                }
+                if (!result.skipped().isEmpty()) {
+                    if (!reply.isEmpty()) reply.append("\n");
+                    reply.append("⚠️ O'tkazib yuborildi (allaqachon bor yoki ").append(GenreService.MAX_NAME_LENGTH)
+                            .append(" belgidan uzun): ").append(String.join(", ", result.skipped()));
+                }
+                sendText(chatId, reply.isEmpty() ? "Hech qanday janr yozilmadi." : reply.toString());
+                sendGenreAdminList(chatId);
+            }
             case AWAITING_CHANNEL_DURATION -> {
                 try {
                     int days = Integer.parseInt(text.trim());
@@ -713,7 +803,12 @@ public class MovieBot extends TelegramLongPollingBot {
         }
 
         sendText(chatId, "✅ \"" + pending.getTitle() + "\" uchun fasl/qismlar qo'shildi!");
+        Long movieId = pending.getMovieId();
         sessionManager.clear(userId);
+        // yangi serial bo'lsa janr taklif qilinadi; mavjud serialga fasl qo'shilganda shart emas
+        if (movieId != null && !pending.isSeasonAdditionOnly()) {
+            offerGenres(chatId, movieService.getById(movieId));
+        }
         sendAdminMenu(chatId);
     }
 
@@ -1045,8 +1140,9 @@ public class MovieBot extends TelegramLongPollingBot {
     private void finishAddMovie(long chatId, long userId, String fileId) {
         PendingMovie pending = sessionManager.getPendingMovie(userId);
 
+        Movie movie;
         if (pending.isEditing()) {
-            movieService.update(
+            movie = movieService.update(
                     pending.getEditingCode(),
                     pending.getTitle(),
                     pending.getCode(),
@@ -1057,7 +1153,7 @@ public class MovieBot extends TelegramLongPollingBot {
             );
             sendText(chatId, "✅ \"" + pending.getTitle() + "\" yangilandi!");
         } else {
-            movieService.save(
+            movie = movieService.save(
                     pending.getTitle(),
                     pending.getCode(),
                     pending.getType(),
@@ -1069,7 +1165,60 @@ public class MovieBot extends TelegramLongPollingBot {
         }
 
         sessionManager.clear(userId);
+        offerGenres(chatId, movie);
         sendAdminMenu(chatId);
+    }
+
+    // kino qo'shilgandan keyin janr belgilashni taklif qiladi (janrlar bo'lsa)
+    private void offerGenres(long chatId, Movie movie) {
+        if (movie == null || genreService.findAll().isEmpty()) return;
+
+        sendTextWithMarkup(chatId, "🎭 \"" + movie.getTitle() + "\" uchun janrlarni belgilaysizmi?",
+                Keyboards.linkToGenres(movie.getId()));
+    }
+
+    private void sendMovieGenreToggle(long chatId, Long movieId, Integer editMessageId) {
+        Movie movie = movieService.getById(movieId);
+        List<Genre> genres = genreService.findAll();
+
+        if (genres.isEmpty()) {
+            sendTextWithMarkup(chatId, "Hali janrlar qo'shilmagan. Avval admin paneldagi 🎭 Janrlar bo'limidan qo'shing.",
+                    Keyboards.adminMenu());
+            return;
+        }
+
+        InlineKeyboardMarkup markup = Keyboards.movieGenreToggleMenu(movieId, movie.getCode(), genres,
+                new HashSet<>(genreService.genreIdsForMovie(movieId)));
+        sendOrEditList(chatId, editMessageId, "🎭 \"" + movie.getTitle() + "\" janrlari (bosib belgilang):", markup);
+    }
+
+    private void sendGenreAdminList(long chatId) {
+        var genres = genreService.findAllWithMovieCount();
+        String text = genres.isEmpty()
+                ? "🎭 Janrlar hali qo'shilmagan.\n\nQo'shilgan janrlar foydalanuvchi menyusida chiqadi, kinolarga esa kartochkasidagi 🎭 tugma orqali belgilanadi."
+                : "🎭 Janrlar (qavs ichida kinolar soni).\nO'chirish uchun janrni bosing:";
+        sendTextWithMarkup(chatId, text, Keyboards.genreAdminMenu(genres));
+    }
+
+    private void sendUserGenres(long chatId) {
+        var genres = genreService.findNonEmpty();
+        if (genres.isEmpty()) {
+            sendTextWithMarkup(chatId, "Hozircha janrlar bo'yicha kino yo'q.", Keyboards.backToUserMenu());
+            return;
+        }
+        sendTextWithMarkup(chatId, "🎭 Janrni tanlang:", Keyboards.userGenreMenu(genres));
+    }
+
+    private void sendGenreMovies(long chatId, Long genreId, int page, Integer editMessageId) {
+        Optional<Genre> genre = genreService.findById(genreId);
+        List<Movie> movies = movieService.findByGenre(genreId);
+
+        if (genre.isEmpty() || movies.isEmpty()) {
+            sendUserGenres(chatId);
+            return;
+        }
+        sendOrEditList(chatId, editMessageId, "🎭 " + genre.get().getName() + ":",
+                Keyboards.userGenreMoviePage(movies, genreId, page));
     }
 
     private void showMovieDetail(long chatId, String code) {
@@ -1652,21 +1801,32 @@ public class MovieBot extends TelegramLongPollingBot {
 
 
     private String buildMovieCaption(Movie movie) {
-        String header = "🎬 <b>" + escape(movie.getTitle()) + "</b>\n\n";
+        String header = "🎬 <b>" + escape(movie.getTitle()) + "</b>\n" + genresLine(movie) + "\n";
         String footer = "\n\n👁 Ko'rishlar: " + formatCount(effectiveViewCount(movie)) + "\n"
-                + "🆔 Kodi: " + escape(movie.getCode()) + "\n\n"
-                + "📢 Guruhimiz: " + groupLink;
+                + "🆔 Kodi: " + escape(movie.getCode())
+                + groupLine();
         return header + "📖 " + fitDescription(movie.getDescription(), header + footer) + footer;
     }
 
     private String buildSeasonCaption(Season season) {
         Movie movie = season.getMovie();
         String header = "🎬 <b>" + escape(movie.getTitle()) + "</b>\n"
-                + season.getSeasonNumber() + "-fasl\n\n";
+                + season.getSeasonNumber() + "-fasl\n" + genresLine(movie) + "\n";
         String footer = "\n\n👁 Ko'rishlar: " + formatCount(season.getViewCount()) + "\n"
-                + "🆔 Kodi: " + escape(movie.getCode()) + "\n\n"
-                + "📢 Guruhimiz: " + groupLink;
+                + "🆔 Kodi: " + escape(movie.getCode())
+                + groupLine();
         return header + "📖 " + fitDescription(movie.getDescription(), header + footer) + footer;
+    }
+
+    // janr belgilanmagan bo'lsa bo'sh
+    private String genresLine(Movie movie) {
+        List<String> names = genreService.namesForMovie(movie.getId());
+        return names.isEmpty() ? "" : "🎭 " + escape(String.join(", ", names)) + "\n";
+    }
+
+    // BOT_GROUP_LINK berilmagan bo'lsa qator umuman chiqmaydi
+    private String groupLine() {
+        return groupLink == null || groupLink.isBlank() ? "" : "\n\n📢 Guruhimiz: " + escape(groupLink);
     }
 
     // Caption limitiga sig'adigan qilib tavsifni qisqartiradi

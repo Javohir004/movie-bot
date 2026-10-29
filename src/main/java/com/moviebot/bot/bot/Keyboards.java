@@ -18,7 +18,75 @@ public class Keyboards {
         rows.add(List.of(button("👥 Adminlar ro'yxati", "ADMIN:LIST_ADMINS")));
         rows.add(List.of(button("📢 Majburiy kanallar", "ADMIN:CHANNELS")));
         rows.add(List.of(button("📣 Reklama yuborish", "ADMIN:BROADCAST")));
+        rows.add(List.of(button("🎭 Janrlar", "ADMIN:GENRES")));
         rows.add(List.of(button("📊 Statistika", "ADMIN:STATS")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup genreAdminMenu(List<com.moviebot.bot.repo.GenreRepository.GenreWithCount> genres) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        for (var g : genres) {
+            rows.add(List.of(button("❌ " + g.getName() + " (" + g.getMovies() + ")", "RMGENRE:" + g.getId())));
+        }
+        rows.add(List.of(button("➕ Janr qo'shish", "ADMIN:ADD_GENRE")));
+        rows.add(List.of(button("🔙 Menyuga", "ADMIN:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup linkToGenres(Long movieId) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("🎭 Janrlarni belgilash", "MGENRES:" + movieId)));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup genreRemoveConfirmMenu(Long genreId) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(
+                button("✅ Ha, o'chir", "RMGENRECONF:" + genreId),
+                button("❌ Yo'q", "ADMIN:GENRES")
+        ));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    // kinoga janr belgilash: bosilganda ✅ qo'yiladi yoki olinadi
+    public static InlineKeyboardMarkup movieGenreToggleMenu(Long movieId, String movieCode, List<Genre> genres,
+                                                            java.util.Collection<Long> selected) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        List<InlineKeyboardButton> row = new ArrayList<>();
+        for (Genre g : genres) {
+            String mark = selected.contains(g.getId()) ? "✅ " : "";
+            row.add(button(mark + g.getName(), "MGT:" + movieId + ":" + g.getId()));
+            if (row.size() == 2) {
+                rows.add(row);
+                row = new ArrayList<>();
+            }
+        }
+        if (!row.isEmpty()) rows.add(row);
+
+        rows.add(List.of(button("✔️ Tayyor", "LISTITEM:" + movieCode)));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup userGenreMenu(List<com.moviebot.bot.repo.GenreRepository.GenreWithCount> genres) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        List<InlineKeyboardButton> row = new ArrayList<>();
+        for (var g : genres) {
+            row.add(button(g.getName() + " (" + g.getMovies() + ")", "GENRE:" + g.getId()));
+            if (row.size() == 2) {
+                rows.add(row);
+                row = new ArrayList<>();
+            }
+        }
+        if (!row.isEmpty()) rows.add(row);
+
+        rows.add(List.of(button("🔙 Orqaga", "USER:MENU")));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public static InlineKeyboardMarkup userGenreMoviePage(List<Movie> movies, Long genreId, int page) {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        addMoviePage(rows, movies, page, "MOVIE:", "UGP:" + genreId + ":");
+        rows.add(List.of(button("🔙 Janrlar", "USER:GENRES")));
         return new InlineKeyboardMarkup(rows);
     }
 
@@ -106,6 +174,7 @@ public class Keyboards {
                 button("✏️ Tahrirlash", "EDIT:" + movie.getCode()),
                 button("🗑 O'chirish", "DELETE:" + movie.getCode())
         ));
+        rows.add(List.of(button("🎭 Janrlar", "MGENRES:" + movie.getId())));
         rows.add(List.of(button("🔙 Ro'yxatga", "ADMIN:LIST_MOVIES")));
 
         return new InlineKeyboardMarkup(rows);
@@ -124,6 +193,7 @@ public class Keyboards {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         rows.add(List.of(button("🔍 Qidirish", "USER:SEARCH")));
         rows.add(List.of(button("📽 Barchasini ko'rish", "USER:LIST_ALL")));
+        rows.add(List.of(button("🎭 Janrlar", "USER:GENRES")));
         rows.add(List.of(button("🔥 Top 5", "USER:TOP")));
         return new InlineKeyboardMarkup(rows);
     }

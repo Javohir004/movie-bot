@@ -69,6 +69,26 @@ class KeyboardsTest {
     }
 
     @Test
+    void genreToggleMarksSelectedGenres() {
+        List<com.moviebot.bot.domain.Genre> genres = List.of(
+                com.moviebot.bot.domain.Genre.builder().id(1L).name("Drama").build(),
+                com.moviebot.bot.domain.Genre.builder().id(2L).name("Komediya").build());
+
+        InlineKeyboardMarkup markup = Keyboards.movieGenreToggleMenu(10L, "A1", genres, java.util.Set.of(2L));
+        List<String> texts = markup.getKeyboard().stream().flatMap(List::stream).map(InlineKeyboardButton::getText).toList();
+
+        assertThat(texts).contains("Drama", "✅ Komediya");
+        assertThat(callbacks(markup)).contains("MGT:10:1", "MGT:10:2", "LISTITEM:A1");
+    }
+
+    @Test
+    void genreMoviePagesKeepGenreInCallback() {
+        List<String> data = callbacks(Keyboards.userGenreMoviePage(movies(25), 7L, 1));
+
+        assertThat(data).contains("UGP:7:0", "UGP:7:2", "USER:GENRES");
+    }
+
+    @Test
     void longestCallbackFitsTelegramLimitForMaxCodeLength() {
         String maxCode = "X".repeat(20);
         Movie movie = new Movie();
