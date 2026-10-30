@@ -95,3 +95,7 @@ Zaxiradan tiklash README'dagi **Restoring a backup** bo'limida yozilgan.
 - **Logda `401 Unauthorized`** — token noto'g'ri, @BotFather'dan qayta nusxalang.
 - **Logda `409 Conflict`** — shu token bilan bot boshqa joyda ham ishlab turibdi; ulardan birini to'xtating.
 - **Majburiy kanal qo'shilmayapti** — botni o'sha kanalga **admin** qilib qo'shing.
+
+## Keyingi qadam
+
+Bot ishlay boshlagach, uni qanday boshqarish [ADMIN_GUIDE_UZ.md](ADMIN_GUIDE_UZ.md) da yozilgan: kino qo'shish, kanallar, reklama, janrlar va statistika.
