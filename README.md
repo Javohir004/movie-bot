@@ -227,7 +227,8 @@ written commercial license. See [LICENSE](LICENSE).
 > 🇺🇿 Kodni ko'rish va o'rganish mumkin. Botni pul topish uchun ishlatish, sotish yoki boshqalarga
 > o'rnatib berish faqat muallifning yozma ruxsati (tijorat litsenziyasi) bilan.
 
-For a commercial license, contact [@Javohir004](https://github.com/Javohir004).
+For a commercial license (one license per bot), contact [@Feniks004](https://t.me/Feniks004) on Telegram
+or [@Javohir004](https://github.com/Javohir004) on GitHub.
 
 The bot ships without any media content. Whoever runs it is responsible for the content they
 upload and for holding the rights to it.
