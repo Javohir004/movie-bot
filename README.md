@@ -122,7 +122,7 @@ Deletions are **soft deletes** — an `is_active` flag is toggled instead of rem
 
 ## 🚀 Getting Started
 
-> 🇺🇿 Step-by-step server installation guide in Uzbek: [docs/INSTALL_UZ.md](docs/INSTALL_UZ.md)
+> 🇺🇿 Uzbek guides: server installation — [docs/INSTALL_UZ.md](docs/INSTALL_UZ.md), using the admin panel — [docs/ADMIN_GUIDE_UZ.md](docs/ADMIN_GUIDE_UZ.md). Release notes: [CHANGELOG.md](CHANGELOG.md).
 
 ### Configuration
 
@@ -219,4 +219,15 @@ docker compose up -d
 
 ## 📄 License
 
-This project was built as a personal/learning project. Feel free to fork and adapt it.
+**Source-available, not open source.** You're welcome to read and study the code and run it
+for personal, non-commercial evaluation. Commercial use — running it for a business or a bot
+that earns money, selling, reselling, hosting it for others, or redistributing it — requires a
+written commercial license. See [LICENSE](LICENSE).
+
+> 🇺🇿 Kodni ko'rish va o'rganish mumkin. Botni pul topish uchun ishlatish, sotish yoki boshqalarga
+> o'rnatib berish faqat muallifning yozma ruxsati (tijorat litsenziyasi) bilan.
+
+For a commercial license, contact [@Javohir004](https://github.com/Javohir004).
+
+The bot ships without any media content. Whoever runs it is responsible for the content they
+upload and for holding the rights to it.
