@@ -25,5 +25,15 @@ jobs:
       - name: Testlar
         run: ./mvnw -B test
 
+      # Image qatlamlari (bazaviy image'lar va Maven kutubxonalari) GitHub keshida saqlanadi:
+      # har safar internetdan qayta yuklanmaydi, shuning uchun tekshiruv tez va barqaror bo'ladi.
+      - uses: docker/setup-buildx-action@v3
+
       - name: Docker image yig'iladimi
-        run: docker build -t movie-bot:ci .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: movie-bot:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
